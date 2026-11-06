@@ -232,3 +232,8 @@ input.btn { cursor: text; font-size: 16px; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
 .grid-2 > .card { margin-bottom: 0; } .grid-2 { margin-bottom: 16px; }
 @media (max-width: 640px) { .hl { width: 104px; } }
+
+/* 弹窗 */
+.modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 100; }
+.modal { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); max-width: 520px; width: 100%; padding: 20px 22px; }
+.bm-steps { margin: 10px 0 8px; padding-left: 20px; font-size: 14px; } .bm-steps li { margin: 6px 0; }

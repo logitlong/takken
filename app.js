@@ -188,14 +188,7 @@ async function viewPoint(id, opts = {}) {
       <div class="card">
         <div class="row"><h2 style="margin:0">📝 真题练习</h2><span class="spacer"></span>${dojoSummary(pt)}</div>
         ${pt.dojo ? `<p class="small" style="margin:10px 0">本节对应「${pt.dojo.n}. ${esc(pt.dojo.name)}」分野。点按钮跳过去 → 点书签栏的 <b>📌 宅建</b> 直接开始；<b>做完一批不想做了，再点一次 📌 宅建</b>，一問一答的对错就自动记回来。</p>` : ""}
-        ${S.bm2 ? "" : `<div class="bm-setup">
-          <b>先装书签（只需一次${S.bmOk ? "；书签升级了，旧的「宅建·开始做题」可以删掉" : ""}）：</b>
-          <ol>
-            <li>按 <kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> 显示 Chrome 书签栏</li>
-            <li>把这个按钮<b>拖到书签栏</b>上 → <a class="bm-link" href="${esc(bookmarklet())}" onclick="alert('不要点它，把它拖到书签栏上。');return false">📌 宅建</a></li>
-          </ol>
-          <button class="btn sm" id="bmDone">装好了，不再显示</button>
-        </div>`}
+        ${bmInstalled() ? "" : `<p class="small" style="margin:0 0 10px">还没装 📌 宅建 书签？去 <a href="#/sync">☁️ 同步</a> 页面装一下。</p>`}
         <div class="row">
           <button class="btn primary" data-dojo="marubatu">一問一答（○×）↗</button>
           <button class="btn primary" data-dojo="kakomon">过去问（四选一）↗</button>
@@ -205,7 +198,6 @@ async function viewPoint(id, opts = {}) {
           <span>过去问的成绩读不到，做完可以手动记：</span>
           <button class="btn sm" data-tally="ok">✅ 对 <b>${p.quiz?.ok || 0}</b></button>
           <button class="btn sm" data-tally="ng">❌ 错 <b>${p.quiz?.ng || 0}</b></button>
-          ${S.bm2 ? `<span class="spacer"></span><a href="javascript:void 0" id="bmShow">书签丢了？重新安装</a>` : ""}
         </div>
       </div>
       <div class="pager">
@@ -248,8 +240,6 @@ async function viewPoint(id, opts = {}) {
     b.querySelector("b").textContent = q[b.dataset.tally];
   });
   document.querySelectorAll("[data-dojo]").forEach((b) => b.onclick = () => openDojo(b.dataset.dojo, pt.dojo?.n));
-  if ($("#bmDone")) $("#bmDone").onclick = () => { S.bm2 = true; save(); viewPoint(id); };
-  if ($("#bmShow")) $("#bmShow").onclick = () => { S.bm2 = false; save(); viewPoint(id); };
   if ($("#wrongQ")) $("#wrongQ").onclick = () => {
     $("#input").value = "我做错了一道真题：\n【题目】\n\n【我的答案】\n【正确答案】\n请告诉我错在哪里、对应这一节的哪条规则，以及下次怎么避免。";
     $("#input").rows = 7; $("#input").focus();
@@ -312,6 +302,38 @@ const bookmarklet = () => `javascript:(()=>{` +
   `const d=(localStorage.getItem('MB_RESULT')||'').split('|').map(x=>x.split(',')).filter(x=>x.length===4&&/^1_\\d+$/.test(x[2])).map(x=>[x[0],x[1],x[2].slice(2),x[3]].join(',')).join(';');` +
   `if(!d){alert('这台设备上还没有一問一答（権利関係）的答题记录。\\n（过去问的成绩存在对方服务器上，读不到，请在学习站手动记。）');return}` +
   `window.open(${JSON.stringify(location.origin + location.pathname)}+'#/import/'+encodeURIComponent(d),'_blank')})()`;
+// 书签装在浏览器里，所以「装没装」按设备记（localStorage），不跟着学习记录同步
+const BM_KEY = "takken.bm";
+function bmInstalled() { try { return localStorage.getItem(BM_KEY) === "1"; } catch { return false; } }
+function setBmInstalled(v) { try { v ? localStorage.setItem(BM_KEY, "1") : localStorage.removeItem(BM_KEY); } catch {} }
+const isTouch = () => matchMedia("(pointer: coarse)").matches && !matchMedia("(pointer: fine)").matches;
+function bmSetupHtml() {
+  return `<ol class="bm-steps">
+    <li>按 <kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>（Windows 是 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>）显示书签栏</li>
+    <li>把这个按钮<b>拖到书签栏</b>上 → <a class="bm-link" href="${esc(bookmarklet())}" onclick="alert('不要点它，把它拖到书签栏上。');return false">📌 宅建</a></li>
+    <li>用法：课程页点题目按钮跳过去 → 点 <b>📌 宅建</b> 直接开始；做完一批，再点一次 <b>📌 宅建</b>，一問一答的对错自动记回来</li>
+  </ol>`;
+}
+// 新设备（这个浏览器还没确认装过书签）：弹窗提示先装书签。手机/平板拖不了书签，不弹。
+let bmAsked = false;
+function maybeAskBookmark() {
+  if (bmAsked || bmInstalled() || isTouch() || $(".modal-bg")) return;
+  bmAsked = true;
+  const bg = document.createElement("div");
+  bg.className = "modal-bg";
+  bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="bmTitle">
+    <h2 id="bmTitle" style="margin-top:0">📌 新设备：先装做题书签</h2>
+    <p class="small muted" style="margin-top:0">做真题要靠这个书签：跳到宅建試験ドットコム后自动选好分野，做完一批还能把一問一答的对错记回来。每个浏览器装一次就行。</p>
+    ${bmSetupHtml()}
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button class="btn" id="bmLater">稍后</button>
+      <button class="btn primary" id="bmYes">已经装好了</button>
+    </div></div>`;
+  document.body.appendChild(bg);
+  const close = () => bg.remove();
+  bg.querySelector("#bmLater").onclick = close;
+  bg.querySelector("#bmYes").onclick = () => { setBmInstalled(true); close(); route(); };
+}
 function openDojo(kind, n) {
   window.open(`https://takken-siken.com/${kind}.php${n ? `#tk=${n}` : ""}`, "_blank");
 }
@@ -675,6 +697,14 @@ function viewSync() {
     </div>
     <div class="small" id="ghMsg" style="margin-top:6px"></div>
   </div>
+  <div class="card">
+    <div class="row"><h2 style="margin:0">📌 定位书签</h2><span class="spacer"></span>
+      <span class="small ${bmInstalled() ? "" : "muted"}">${bmInstalled() ? "✅ 这台设备已装好" : "这台设备还没装"}</span></div>
+    ${isTouch() ? `<p class="small muted" style="margin:8px 0 0">手机 / 平板上拖不了书签，这一项请在电脑上装。</p>` : bmSetupHtml()}
+    ${isTouch() ? "" : `<div class="row"><span class="spacer"></span>${bmInstalled()
+      ? `<button class="btn sm" id="bmReset">书签丢了，重新装</button>`
+      : `<button class="btn sm primary" id="bmMark">已经装好了</button>`}</div>`}
+  </div>
   ${booted ? `<div class="card"><div class="row"><div style="flex:1"><b>清除学习记录</b><div class="small muted">从头开始学：进度、笔记、对话、闪卡记忆、复习计划、卡点全部清空${c ? "，所有设备一起清空" : ""}。讲义和闪卡内容不受影响。</div></div>
     <button class="btn danger" id="resetAll">清除</button></div></div>` : ""}
   ${ENV.local ? "" : `<p class="small muted"><a href="javascript:void 0" id="clearCache">清除本机内容缓存</a>（内容更新后用）</p>`}`;
@@ -693,6 +723,8 @@ function viewSync() {
     } catch (e) { setGhCfg(old); $("#ghMsg").textContent = `❌ ${e.message}`; }
   };
   if ($("#ghOut")) $("#ghOut").onclick = () => { if (confirm("从这台设备删除令牌？（仓库里的记录不受影响）")) { setGhCfg(null); viewSync(); renderNav(); } };
+  if ($("#bmMark")) $("#bmMark").onclick = () => { setBmInstalled(true); viewSync(); };
+  if ($("#bmReset")) $("#bmReset").onclick = () => { setBmInstalled(false); viewSync(); };
   if ($("#syncNow")) $("#syncNow").onclick = async () => { await doSync(); viewSync(); };
   if ($("#clearCache")) $("#clearCache").onclick = async () => { await clearContentCache(); alert("已清除"); };
   if ($("#resetAll")) $("#resetAll").onclick = async () => {
@@ -720,6 +752,7 @@ function dojoSummary(pt) {
   return s.n ? `<span class="small muted" title="这个分野在一問一答里的成绩（来自书签导入）">一問一答 本分野 <b>${s.ok}/${s.n}</b> · ${Math.round((s.ok / s.n) * 100)}%</span>` : "";
 }
 function viewImport(raw) {
+  setBmInstalled(true);
   const since = Math.floor((S.resetAt || 0) / 1000);
   const have = new Set(dojoLog().map((x) => `${x[0]}@${x[3]}`));
   const rows = decodeURIComponent(raw || "").split(";").map((x) => x.split(","))
@@ -851,6 +884,7 @@ async function boot2() {
   stampBaseline(S);
   if (ghCfg()) await doSync();
   route();
+  if (!location.hash.startsWith("#/import")) maybeAskBookmark();
 }
 (async () => {
   await detectEnv();
