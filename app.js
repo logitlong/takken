@@ -1,5 +1,5 @@
 import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js";
-import { ENV, DEFAULT_REPO, detectEnv, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
+import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
   loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js";
 
 // ---------------- 状态 ----------------
@@ -893,6 +893,13 @@ async function boot2() {
   // 外部设备：没有令牌就只能先去填令牌
   if (!ENV.local && !ghCfg()) { renderNav(); location.hash = "#/sync"; viewSync(); return; }
   await boot2();
+  // 线上版在电脑上：本机服务开着就切到「有 AI」
+  if (!ENV.local) probeLocalAI().then((ok) => {
+    if (!ok) return;
+    document.body.classList.remove("no-ai");
+    initAIStatus();
+    if (!(cur?.streaming)) route();
+  });
   setInterval(() => { if (ghCfg() && document.visibilityState === "visible") doSync(); }, 120_000);
   document.addEventListener("visibilitychange", () => { if (ghCfg()) doSync(); });
 })();
