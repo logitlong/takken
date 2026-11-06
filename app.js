@@ -1,6 +1,6 @@
-import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js";
+import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=e67b54dc96";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=e67b54dc96";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
