@@ -96,11 +96,11 @@ export async function loadLocalState() {
 }
 function norm(s) {
   s ||= {};
-  s.points ||= {}; s.stuck ||= []; s.days ||= {}; s.stuckDel ||= [];
+  s.points ||= {}; s.stuck ||= []; s.days ||= {}; s.stuckDel ||= []; s.dojoLog ||= [];
   return s;
 }
 export function writeLocalState(S) {
-  if (ENV.local) return fetch("/api/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(S) }).catch(() => {});
+  if (ENV.local) { const body = JSON.stringify(S); return fetch("/api/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body, keepalive: body.length < 60000 }).catch(() => {}); }
   try { localStorage.setItem(K.state, JSON.stringify(S)); } catch {}
 }
 
@@ -121,14 +121,17 @@ export function stamp(S) {
 function afterReset(x, R) {
   if ((x.resetAt || 0) >= R) return x;
   const keep = (o) => (o.t || 0) > R;
-  return { ...x, resetAt: R, days: {}, stuckDel: x.stuckDel,
+  return { ...x, resetAt: R, days: {}, stuckDel: x.stuckDel, dojoLog: x.dojoLog.filter((e) => e[3] * 1000 > R),
     points: Object.fromEntries(Object.entries(x.points).filter(([, p]) => keep(p))), stuck: x.stuck.filter(keep) };
 }
 export function merge(a, b) {
   a = norm(a); b = norm(b);
   const R = Math.max(a.resetAt || 0, b.resetAt || 0);
   if (R) { a = afterReset(a, R); b = afterReset(b, R); }
-  const out = { ...a, ...b, points: {}, days: { ...a.days }, bmOk: a.bmOk || b.bmOk, resetAt: R || undefined };
+  const out = { ...a, ...b, points: {}, days: { ...a.days }, bmOk: a.bmOk || b.bmOk, bm2: a.bm2 || b.bm2, resetAt: R || undefined };
+  // 一問一答成绩：两边合在一起，按 题号+时间 去重
+  const seen = new Set();
+  out.dojoLog = [...a.dojoLog, ...b.dojoLog].filter((e) => { const k = `${e[0]}@${e[3]}`; return !seen.has(k) && seen.add(k); }).sort((x, y) => x[3] - y[3]);
   for (const id of new Set([...Object.keys(a.points), ...Object.keys(b.points)])) {
     const x = a.points[id], y = b.points[id];
     out.points[id] = !x ? y : !y ? x : (y.t || 0) > (x.t || 0) ? y : x;

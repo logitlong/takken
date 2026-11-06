@@ -1,4 +1,4 @@
-import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL } from "./toc.js";
+import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js";
 import { ENV, DEFAULT_REPO, detectEnv, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
   loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js";
 
@@ -31,11 +31,13 @@ let saveTimer, pushTimer;
 function save() {
   stamp(S);
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => writeLocalState(S), 400);
+  saveTimer = setTimeout(() => { saveTimer = null; writeLocalState(S); }, 400);
   clearTimeout(pushTimer);
   if (ghCfg()) pushTimer = setTimeout(doSync, 4000);
   renderNav();
 }
+// 关页面/刷新时，还没写出去的保存立刻写掉
+addEventListener("pagehide", () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; writeLocalState(S); } });
 const getS = () => S;
 const setS = (x) => { S = x; stampBaseline(S); writeLocalState(S); };
 async function doSync() {
@@ -184,16 +186,13 @@ async function viewPoint(id, opts = {}) {
         </div>
       </div>
       <div class="card">
-        <div class="row"><h2 style="margin:0">📝 真题练习</h2><span class="spacer"></span>
-          <span class="small muted">记录：</span>
-          <button class="btn sm" data-tally="ok">✅ 对 <b>${p.quiz?.ok || 0}</b></button>
-          <button class="btn sm" data-tally="ng">❌ 错 <b>${p.quiz?.ng || 0}</b></button></div>
-        ${pt.dojo ? `<p class="small" style="margin:10px 0">本节对应宅建試験ドットコムの<b>「${pt.dojo.n}. ${esc(pt.dojo.name)}」</b>分野。点下面按钮跳过去，到那边<b>点一下书签栏的「宅建·开始做题」</b>，就直接从这个分野的第 1 题开始。</p>` : ""}
-        ${S.bmOk ? "" : `<div class="bm-setup">
-          <b>第一次用，先装书签（只需一次）：</b>
+        <div class="row"><h2 style="margin:0">📝 真题练习</h2><span class="spacer"></span>${dojoSummary(pt)}</div>
+        ${pt.dojo ? `<p class="small" style="margin:10px 0">本节对应「${pt.dojo.n}. ${esc(pt.dojo.name)}」分野。点按钮跳过去 → 点书签栏的 <b>📌 宅建</b> 直接开始；<b>做完一批不想做了，再点一次 📌 宅建</b>，一問一答的对错就自动记回来。</p>` : ""}
+        ${S.bm2 ? "" : `<div class="bm-setup">
+          <b>先装书签（只需一次${S.bmOk ? "；书签升级了，旧的「宅建·开始做题」可以删掉" : ""}）：</b>
           <ol>
             <li>按 <kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> 显示 Chrome 书签栏</li>
-            <li>把这个按钮<b>拖到书签栏</b>上 → <a class="bm-link" href="${esc(BOOKMARKLET)}" onclick="alert('不要点它，把它拖到书签栏上。');return false">📌 宅建·开始做题</a></li>
+            <li>把这个按钮<b>拖到书签栏</b>上 → <a class="bm-link" href="${esc(bookmarklet())}" onclick="alert('不要点它，把它拖到书签栏上。');return false">📌 宅建</a></li>
           </ol>
           <button class="btn sm" id="bmDone">装好了，不再显示</button>
         </div>`}
@@ -202,7 +201,12 @@ async function viewPoint(id, opts = {}) {
           <button class="btn primary" data-dojo="kakomon">过去问（四选一）↗</button>
           ${ENV.ai ? `<button class="btn" id="wrongQ">做错了？让 AI 讲</button>` : ""}
         </div>
-        <p class="small muted" style="margin:8px 0 0">做完一题就点上面的 ✅/❌ 记一下。错题把题目和选项复制过来问 AI，它会结合这一节的原文告诉你错在哪。${S.bmOk ? ` <a href="javascript:void 0" id="bmShow">书签丢了？重新安装</a>` : ""}</p>
+        <div class="row small muted" style="margin-top:10px">
+          <span>过去问的成绩读不到，做完可以手动记：</span>
+          <button class="btn sm" data-tally="ok">✅ 对 <b>${p.quiz?.ok || 0}</b></button>
+          <button class="btn sm" data-tally="ng">❌ 错 <b>${p.quiz?.ng || 0}</b></button>
+          ${S.bm2 ? `<span class="spacer"></span><a href="javascript:void 0" id="bmShow">书签丢了？重新安装</a>` : ""}
+        </div>
       </div>
       <div class="pager">
         ${prev ? `<a class="btn" href="#/p/${prev.id}">← ${esc(prev.title)}</a>` : "<span></span>"}
@@ -244,8 +248,8 @@ async function viewPoint(id, opts = {}) {
     b.querySelector("b").textContent = q[b.dataset.tally];
   });
   document.querySelectorAll("[data-dojo]").forEach((b) => b.onclick = () => openDojo(b.dataset.dojo, pt.dojo?.n));
-  if ($("#bmDone")) $("#bmDone").onclick = () => { S.bmOk = true; save(); viewPoint(id); };
-  if ($("#bmShow")) $("#bmShow").onclick = () => { S.bmOk = false; save(); viewPoint(id); };
+  if ($("#bmDone")) $("#bmDone").onclick = () => { S.bm2 = true; save(); viewPoint(id); };
+  if ($("#bmShow")) $("#bmShow").onclick = () => { S.bm2 = false; save(); viewPoint(id); };
   if ($("#wrongQ")) $("#wrongQ").onclick = () => {
     $("#input").value = "我做错了一道真题：\n【题目】\n\n【我的答案】\n【正确答案】\n请告诉我错在哪里、对应这一节的哪条规则，以及下次怎么避免。";
     $("#input").rows = 7; $("#input").focus();
@@ -287,22 +291,27 @@ const QUICK = {
   review: "现在是复习时间。请对这一节进行复习提问：一次只问一个问题，问理解型问题（不要只问定义），不要给答案，等我回答后再批改并问下一个。共问 3 个。",
 };
 
-// ----- 跳转到宅建試験ドットコム（一問一答道場 / 過去問道場），并选好分野 -----
-// 那个网站只接受「从它自己页面」点的出題開始（从别的网站直接提交会被打回开始页）。
-// 所以：本站按钮打开 kakomon.php#tk=分野号 → 在那边点一下书签「宅建·开始做题」，
-// 书签在它自己的页面上提交它自己的出题表单（等于替你勾选分野再点出題開始）。
-const BOOKMARKLET = `javascript:(()=>{` +
+// ----- 宅建試験ドットコム（一問一答道場 / 過去問道場） -----
+// 那个网站只接受「从它自己页面」点的出題開始，所以用一个书签「📌 宅建」在它的页面上帮你操作：
+// ① 从本站按钮跳过去（网址带 #tk=分野号）→ 点书签：提交它自己的出题表单，直接从这个分野开始
+// ② 其他时候（做完一批题）→ 点书签：读出你浏览器里一問一答的答题记录（它自己存的 MB_RESULT），
+//    带着打开本站 #/import/…，本站去重后记进学习记录。过去问的成绩存在它的服务器上，读不到。
+const bookmarklet = () => `javascript:(()=>{` +
+  `if(location.hostname!=='takken-siken.com'){alert('这个书签要在宅建試験ドットコム的页面上点。');return}` +
   `const m=location.hash.match(/tk=(\\d+)/);` +
-  `if(location.hostname!=='takken-siken.com'||!m){alert('请先在宅建学习站点「一問一答 / 过去问」按钮跳过来，再点这个书签。');return}` +
-  `const k=/kakomon/.test(location.pathname)?'kakomon':'marubatu';` +
-  `const c=document.getElementById('configform');` +
-  `let T=c?[...c.querySelectorAll('[name="times[]"]:checked')].map(e=>e.value):[];` +
-  `if(!T.length)T=['26','25','24','23','22','21-2','21-1','20-2','20-1','19','18','17','16','15','14','13','12'];` +
-  `const f=document.createElement('form');f.method='post';f.action='/'+k+'.php';` +
-  `const a=(n,v)=>{const i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;f.appendChild(i)};` +
-  `T.forEach(t=>a('times[]',t));a('fields[]','1');a('categories[]','1_'+m[1]);` +
-  `if(k==='kakomon'){[1,2,3,4,5].forEach(l=>a('level[]',l));a('mode','1');a('qno','0')}else{a('settingChange','1');a('requestCount','1')}` +
-  `(document.body||document.documentElement).appendChild(f);f.submit()})()`;
+  `if(m){` +
+    `const k=/kakomon/.test(location.pathname)?'kakomon':'marubatu';` +
+    `const c=document.getElementById('configform');` +
+    `let T=c?[...c.querySelectorAll('[name="times[]"]:checked')].map(e=>e.value):[];` +
+    `if(!T.length)T=['26','25','24','23','22','21-2','21-1','20-2','20-1','19','18','17','16','15','14','13','12'];` +
+    `const f=document.createElement('form');f.method='post';f.action='/'+k+'.php';` +
+    `const a=(n,v)=>{const i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;f.appendChild(i)};` +
+    `T.forEach(t=>a('times[]',t));a('fields[]','1');a('categories[]','1_'+m[1]);` +
+    `if(k==='kakomon'){[1,2,3,4,5].forEach(l=>a('level[]',l));a('mode','1');a('qno','0')}else{a('settingChange','1');a('requestCount','1')}` +
+    `(document.body||document.documentElement).appendChild(f);f.submit();return}` +
+  `const d=(localStorage.getItem('MB_RESULT')||'').split('|').map(x=>x.split(',')).filter(x=>x.length===4&&/^1_\\d+$/.test(x[2])).map(x=>[x[0],x[1],x[2].slice(2),x[3]].join(',')).join(';');` +
+  `if(!d){alert('这台设备上还没有一問一答（権利関係）的答题记录。\\n（过去问的成绩存在对方服务器上，读不到，请在学习站手动记。）');return}` +
+  `window.open(${JSON.stringify(location.origin + location.pathname)}+'#/import/'+encodeURIComponent(d),'_blank')})()`;
 function openDojo(kind, n) {
   window.open(`https://takken-siken.com/${kind}.php${n ? `#tk=${n}` : ""}`, "_blank");
 }
@@ -631,6 +640,7 @@ function route() {
   if (r === "stuck") return viewStuck();
   if (r === "sync") return viewSync();
   if (r === "stats") return viewStats();
+  if (r === "import") return viewImport(location.hash.slice("#/import/".length));
   if (r === "p") { const ask = pendingAsk; pendingAsk = null; return viewPoint(id, { review: mode === "review", ask }); }
   return viewHome();
 }
@@ -688,12 +698,51 @@ function viewSync() {
   if ($("#resetAll")) $("#resetAll").onclick = async () => {
     if (!confirm("确定清除全部学习记录，从头开始？")) return;
     if (prompt("这一步不能撤销。请输入「清除」确认：") !== "清除") return;
-    S = { points: {}, stuck: [], days: {}, stuckDel: [], bmOk: S.bmOk, resetAt: Date.now() };
+    S = { points: {}, stuck: [], days: {}, stuckDel: [], bmOk: S.bmOk, bm2: S.bm2, dojoLog: [], resetAt: Date.now() };
     stampBaseline(S);
     writeLocalState(S);
     if (ghCfg()) await doSync();
     location.hash = "#/";
   };
+}
+
+// ---------------- 一問一答成绩（从书签导入） ----------------
+// S.dojoLog = [[题号, 结果(1 对 / 2 错 / 0 跳过), 分野号, 时间(秒)], …]
+const dojoLog = () => (S.dojoLog ||= []);
+function dojoStats(filter = () => true) {
+  let ok = 0, ng = 0;
+  for (const [, r, c, t] of dojoLog()) if (filter(c, t)) { if (r === 1) ok++; else if (r === 2) ng++; }
+  return { ok, ng, n: ok + ng };
+}
+function dojoSummary(pt) {
+  if (!pt.dojo) return "";
+  const s = dojoStats((c) => c === pt.dojo.n);
+  return s.n ? `<span class="small muted" title="这个分野在一問一答里的成绩（来自书签导入）">一問一答 本分野 <b>${s.ok}/${s.n}</b> · ${Math.round((s.ok / s.n) * 100)}%</span>` : "";
+}
+function viewImport(raw) {
+  const since = Math.floor((S.resetAt || 0) / 1000);
+  const have = new Set(dojoLog().map((x) => `${x[0]}@${x[3]}`));
+  const rows = decodeURIComponent(raw || "").split(";").map((x) => x.split(","))
+    .filter((x) => x.length === 4 && /^\d+$/.test(x[2]) && /^\d+$/.test(x[3]))
+    .map(([sid, r, c, t]) => [sid, Number(r), Number(c), Number(t)])
+    .filter((x) => x[3] > since);
+  const fresh = rows.filter((x) => !have.has(`${x[0]}@${x[3]}`));
+  fresh.forEach((x) => { dojoLog().push(x); const d = new Date(x[3] * 1000).toLocaleDateString("sv-SE"); S.days[d] = (S.days[d] || 0) + 1; });
+  dojoLog().sort((a, b) => a[3] - b[3]);
+  if (fresh.length) save();
+  history.replaceState(null, "", location.pathname + "#/import");
+  const ok = fresh.filter((x) => x[1] === 1).length, ng = fresh.filter((x) => x[1] === 2).length, pass = fresh.length - ok - ng;
+  const byCat = {};
+  fresh.forEach(([, r, c]) => { const b = (byCat[c] ||= { ok: 0, ng: 0 }); if (r === 1) b.ok++; else if (r === 2) b.ng++; });
+  $("#app").innerHTML = `<h1>📥 一問一答成绩</h1>
+  <div class="card">${fresh.length ? `
+    <p style="margin-top:0">新记下 <b>${fresh.length}</b> 题：✅ 对 <b>${ok}</b>　❌ 错 <b>${ng}</b>${pass ? `　跳过 ${pass}` : ""}${ok + ng ? `　正确率 <b>${Math.round((ok / (ok + ng)) * 100)}%</b>` : ""}</p>
+    ${Object.entries(byCat).map(([c, b]) => `<div class="hrow"><span class="hl">${c}. ${esc(DOJO_FIELDS[c] || "")}</span>
+      <div class="hbar single">${b.ok + b.ng ? `<span style="display:flex;gap:2px;width:100%">${b.ok ? `<i class="ok" style="flex:${b.ok}"></i>` : ""}${b.ng ? `<i class="ng" style="flex:${b.ng}"></i>` : ""}</span>` : ""}</div>
+      <span class="hv">${b.ok}/${b.ok + b.ng}</span></div>`).join("")}`
+    : `<p style="margin:0">没有新的答题记录（${rows.length ? `这 ${rows.length} 条之前已经记过了` : "没有権利関係的一問一答记录"}）。</p>`}
+  </div>
+  <p class="small muted">累计一問一答 ${dojoStats().n} 题 · 对 ${dojoStats().ok} 题。去 <a href="#/stats">📊 统计</a> 看全部。这个页面可以直接关掉。</p>`;
 }
 
 // ---------------- 统计 ----------------
@@ -705,7 +754,16 @@ function viewStats() {
   const sum = (f) => all.reduce((n, x) => n + f(x.p), 0);
   const known = sum((p) => Object.values(p.cardStat || {}).filter((c) => c.known).length);
   const tries = sum((p) => Object.values(p.cardStat || {}).reduce((n, c) => n + (c.ok || 0) + (c.ng || 0), 0));
-  const qOk = sum((p) => p.quiz?.ok || 0), qNg = sum((p) => p.quiz?.ng || 0);
+  const ds = dojoStats();
+  const qOk = sum((p) => p.quiz?.ok || 0) + ds.ok, qNg = sum((p) => p.quiz?.ng || 0) + ds.ng;
+  // 真题按宅建試験ドットコム的分野统计：一問一答（书签导入）+ 过去问（手动记）
+  const fields = Object.entries(DOJO_FIELDS).map(([n, name]) => {
+    n = Number(n);
+    const d = dojoStats((c) => c === n);
+    const man = all.filter((x) => x.pt.dojo?.n === n).reduce((a, x) => ({ ok: a.ok + (x.p.quiz?.ok || 0), ng: a.ng + (x.p.quiz?.ng || 0) }), { ok: 0, ng: 0 });
+    return { n, name, ok: d.ok + man.ok, ng: d.ng + man.ng };
+  });
+  const fMax = Math.max(1, ...fields.map((x) => x.ok + x.ng));
   const asks = sum((p) => (p.chat || []).filter((m) => m.role === "user").length);
   const stuckOpen = S.stuck.filter((x) => !x.done).length, stuckDone = S.stuck.length - stuckOpen;
   const dayKeys = Object.keys(S.days).sort();
@@ -740,7 +798,7 @@ function viewStats() {
     ${tile(mastered, "已掌握的ポイント", `/ ${POINTS.length}`)}
     ${tile(learning, "学习中")}
     ${tile(known, "闪卡已记住", `张 · 练 ${tries} 次`)}
-    ${tile(qOk + qNg ? Math.round((qOk / (qOk + qNg)) * 100) + "%" : "—", "真题正确率", qOk + qNg ? `${qOk}/${qOk + qNg}` : "")}
+    ${tile(qOk + qNg ? Math.round((qOk / (qOk + qNg)) * 100) + "%" : "—", "真题正确率", qOk + qNg ? `${qOk}/${qOk + qNg} 题` : "")}
     ${tile(asks, "问 AI 的次数")}
     ${tile(stuckOpen, "没解决的卡点", stuckDone ? `· 已解决 ${stuckDone}` : "")}
   </div>
@@ -757,10 +815,10 @@ function viewStats() {
       ${courses.map((x) => `<div class="hrow" title="${esc(x.c.title)}：记住 ${x.known} 张"><span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
         <div class="hbar single">${x.known ? `<i style="width:${(x.known / kMax) * 100}%"></i>` : ""}</div><span class="hv">${x.known}</span></div>`).join("")}
     </div>
-    <div class="card"><h2>真题记录</h2>
-      <div class="legend" style="margin:-4px 0 10px"><span><i class="dot" style="background:var(--good)"></i>✅ 对</span><span><i class="dot" style="background:var(--bad)"></i>❌ 错</span></div>
-      ${courses.map((x) => `<div class="hrow" title="${esc(x.c.title)}：对 ${x.ok}，错 ${x.ng}"><span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
-        <div class="hbar single">${x.ok + x.ng ? `<span style="display:flex;gap:2px;width:${((x.ok + x.ng) / qMax) * 100}%">${x.ok ? `<i class="ok" style="flex:${x.ok}"></i>` : ""}${x.ng ? `<i class="ng" style="flex:${x.ng}"></i>` : ""}</span>` : ""}</div>
+    <div class="card"><h2>真题对错（按分野）</h2>
+      <div class="legend" style="margin:-4px 0 10px"><span><i class="dot" style="background:var(--good)"></i>✅ 对</span><span><i class="dot" style="background:var(--bad)"></i>❌ 错</span><span class="small">一問一答自动导入 + 过去问手动记</span></div>
+      ${fields.map((x) => `<div class="hrow" title="${esc(x.name)}：对 ${x.ok}，错 ${x.ng}${x.ok + x.ng ? `，正确率 ${Math.round((x.ok / (x.ok + x.ng)) * 100)}%` : ""}"><span class="hl">${x.n}. ${esc(x.name)}</span>
+        <div class="hbar single">${x.ok + x.ng ? `<span style="display:flex;gap:2px;width:${((x.ok + x.ng) / fMax) * 100}%">${x.ok ? `<i class="ok" style="flex:${x.ok}"></i>` : ""}${x.ng ? `<i class="ng" style="flex:${x.ng}"></i>` : ""}</span>` : ""}</div>
         <span class="hv">${x.ok + x.ng ? `${x.ok}/${x.ok + x.ng}` : "—"}</span></div>`).join("")}
     </div>
   </div>
