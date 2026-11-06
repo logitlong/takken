@@ -117,9 +117,18 @@ export function stamp(S) {
   for (const [id, p] of Object.entries(S.points)) { const k = keyOf(p); if (snap.get("p:" + id) !== k) { p.t = now; snap.set("p:" + id, k); } }
   for (const s of S.stuck) { const k = keyOf(s); if (snap.get("s:" + s.id) !== k) { s.t = now; snap.set("s:" + s.id, k); } }
 }
+// 「清除学习记录」：resetAt 之前的记录在合并时一律丢掉（不然别的设备会把旧记录同步回来）
+function afterReset(x, R) {
+  if ((x.resetAt || 0) >= R) return x;
+  const keep = (o) => (o.t || 0) > R;
+  return { ...x, resetAt: R, days: {}, stuckDel: x.stuckDel,
+    points: Object.fromEntries(Object.entries(x.points).filter(([, p]) => keep(p))), stuck: x.stuck.filter(keep) };
+}
 export function merge(a, b) {
   a = norm(a); b = norm(b);
-  const out = { ...a, ...b, points: {}, days: { ...a.days }, bmOk: a.bmOk || b.bmOk };
+  const R = Math.max(a.resetAt || 0, b.resetAt || 0);
+  if (R) { a = afterReset(a, R); b = afterReset(b, R); }
+  const out = { ...a, ...b, points: {}, days: { ...a.days }, bmOk: a.bmOk || b.bmOk, resetAt: R || undefined };
   for (const id of new Set([...Object.keys(a.points), ...Object.keys(b.points)])) {
     const x = a.points[id], y = b.points[id];
     out.points[id] = !x ? y : !y ? x : (y.t || 0) > (x.t || 0) ? y : x;

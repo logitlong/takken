@@ -9,6 +9,15 @@ const SPEEDS = [0.8, 1, 1.25, 1.5, 1.75, 2];
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// 中日文里 **（教材外补充）**法律、**「善意」**的 这种加粗，标准 Markdown 规则认不出来（紧挨全角标点），这里补一条规则
+marked.use({ extensions: [{
+  name: "strongCJK", level: "inline",
+  start(src) { const i = src.indexOf("**"); return i < 0 ? undefined : i; },
+  tokenizer(src) {
+    const m = /^\*\*(?!\s)((?:[^*]|\*(?!\*))+?)(?<!\s)\*\*(?!\*)/.exec(src);
+    if (m) return { type: "strong", raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1]) };
+  },
+}] });
 const md = (s) => DOMPurify.sanitize(marked.parse(s || ""));
 const today = () => new Date().toLocaleDateString("sv-SE");
 const addDays = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toLocaleDateString("sv-SE"); };
@@ -64,9 +73,12 @@ function renderNav() {
   const r = location.hash.split("/")[1] || "";
   const due = dueList().length, stuck = openStuck().length;
   const item = (h, label, n) => `<a href="#/${h}" class="${r === h ? "on" : ""}">${label}${n ? `<span class="badge">${n}</span>` : ""}</a>`;
+  $("#nav").innerHTML = item("", "首页") + item("toc", "目录") + item("review", "今日复习", due) + item("stuck", "卡点本", stuck) + item("stats", "统计");
   const sy = { off: "", syncing: "sync-ing", ok: "sync-ok", error: "sync-err" }[sync.state];
-  $("#nav").innerHTML = item("", "首页") + item("toc", "目录") + item("review", "今日复习", due) + item("stuck", "卡点本", stuck)
-    + `<a href="#/sync" class="${r === "sync" ? "on" : ""}" title="${esc(syncTip())}">☁️ 同步${sy ? `<i class="sync-dot ${sy}"></i>` : ""}</a>`;
+  const sb = $("#syncBtn");
+  sb.classList.toggle("on", r === "sync");
+  sb.title = `同步：${syncTip()}`;
+  sb.innerHTML = `☁️${sy ? `<i class="sync-dot ${sy}"></i>` : ""}`;
 }
 
 // ---------------- 首页 ----------------
@@ -618,6 +630,7 @@ function route() {
   if (r === "review") return viewReview();
   if (r === "stuck") return viewStuck();
   if (r === "sync") return viewSync();
+  if (r === "stats") return viewStats();
   if (r === "p") { const ask = pendingAsk; pendingAsk = null; return viewPoint(id, { review: mode === "review", ask }); }
   return viewHome();
 }
@@ -633,43 +646,37 @@ function syncTip() {
 }
 function viewSync() {
   const c = ghCfg();
+  const pts = Object.values(S.points);
+  const learned = pts.filter((p) => p.status && p.status !== "new").length;
+  const mastered = pts.filter((p) => p.status === "mastered").length;
+  const cards = pts.reduce((n, p) => n + Object.values(p.cardStat || {}).filter((x) => x.known).length, 0);
+  const chats = pts.reduce((n, p) => n + (p.chat?.length || 0), 0);
   $("#app").innerHTML = `<h1>☁️ 同步</h1>
-  <p class="muted small" style="margin-top:0">学习记录（进度、笔记、AI 对话、闪卡记忆、复习计划、卡点）保存在你的私有仓库，填好令牌后，电脑、手机、平板会自动同步。</p>
-  <div class="card">
-    <div class="row" style="margin-bottom:8px"><b>当前设备</b><span class="spacer"></span>
-      <span class="small ${ENV.ai ? "" : "muted"}">${ENV.ai ? "💻 电脑（本地服务，AI 可用）" : "📱 其他设备（不连接 AI）"}</span></div>
-    <div class="row small"><span class="muted">同步状态：</span><b>${esc(syncTip())}</b><span class="spacer"></span>
-      ${c ? `<button class="btn sm" id="syncNow">立即同步</button>` : ""}</div>
+  <div class="card kv">
+    <div><span>当前设备</span><b>${ENV.ai ? "💻 电脑（AI 可用）" : "📱 其他设备（无 AI）"}</b></div>
+    <div><span>同步</span><b>${esc(syncTip())}</b>${c ? `<button class="btn sm" id="syncNow">立即同步</button>` : ""}</div>
+    <div><span>学习记录</span><b>${booted ? `学过 ${learned} 节 · 掌握 ${mastered} 节 · 闪卡记住 ${cards} 张 · 对话 ${chats} 条 · 学习 ${Object.keys(S.days).length} 天` : "—"}</b></div>
   </div>
   <div class="card">
-    <h2 style="margin-top:0">${c ? "令牌设置" : "第一步：填写访问令牌"}</h2>
-    <label class="small muted">私有仓库</label>
-    <input id="ghRepo" class="btn" style="width:100%;margin:4px 0 10px" value="${esc(c?.repo || DEFAULT_REPO)}">
-    <label class="small muted">访问令牌（Fine-grained token）</label>
-    <input id="ghToken" class="btn" type="password" autocomplete="off" style="width:100%;margin:4px 0 10px" placeholder="${c ? "已保存（不显示），要换就重新填" : "github_pat_…"}">
-    <div class="row"><button class="btn primary" id="ghSave">保存并连接</button>${c ? `<button class="btn" id="ghOut">从这台设备删除令牌</button>` : ""}<span class="small" id="ghMsg"></span></div>
-    <details style="margin-top:12px" ${c ? "" : "open"}><summary class="small">怎么拿令牌？（只需做一次，每台设备填同一个）</summary>
-      <ol class="small" style="padding-left:1.3em">
-        <li>打开 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub › 新建 Fine-grained token</a></li>
-        <li>Expiration 选长一点（比如 1 年）；Repository access 选 <b>Only select repositories</b> → <b>${esc((c?.repo || DEFAULT_REPO).split("/")[1])}</b></li>
-        <li>Permissions › Repository permissions › <b>Contents</b> 选 <b>Read and write</b>，其他不用动</li>
-        <li>生成后复制 <code>github_pat_…</code>，粘贴到上面</li>
-      </ol>
-      <p class="small muted">令牌只存在这台设备的浏览器里，只用来读写你自己的这个私有仓库。</p>
-    </details>
+    <div class="row">
+      <input id="ghToken" class="btn" type="password" autocomplete="off" style="flex:1;min-width:220px" placeholder="${c ? "令牌已保存，要换就重新填" : "填写令牌"}">
+      <button class="btn primary" id="ghSave">${c ? "更换" : "连接"}</button>
+      ${c ? `<button class="btn" id="ghOut">删除令牌</button>` : ""}
+    </div>
+    <div class="small" id="ghMsg" style="margin-top:6px"></div>
   </div>
-  ${ENV.local ? "" : `<div class="card"><h2 style="margin-top:0">本机缓存</h2>
-    <p class="small muted">原文、音频、讲义、闪卡第一次打开时从私有仓库下载，之后存在这台设备上（没网也能看已经打开过的）。</p>
-    <button class="btn sm" id="clearCache">清除缓存（内容更新后用）</button></div>`}`;
+  ${booted ? `<div class="card"><div class="row"><div style="flex:1"><b>清除学习记录</b><div class="small muted">从头开始学：进度、笔记、对话、闪卡记忆、复习计划、卡点全部清空${c ? "，所有设备一起清空" : ""}。讲义和闪卡内容不受影响。</div></div>
+    <button class="btn danger" id="resetAll">清除</button></div></div>` : ""}
+  ${ENV.local ? "" : `<p class="small muted"><a href="javascript:void 0" id="clearCache">清除本机内容缓存</a>（内容更新后用）</p>`}`;
   $("#ghSave").onclick = async () => {
-    const repo = $("#ghRepo").value.trim() || DEFAULT_REPO, token = $("#ghToken").value.trim() || c?.token;
+    const token = $("#ghToken").value.trim();
     if (!token) return ($("#ghMsg").textContent = "请先填写令牌");
     const old = c;
-    setGhCfg({ repo, token });
+    setGhCfg({ repo: c?.repo || DEFAULT_REPO, token });
     $("#ghMsg").textContent = "连接中…";
     try {
       await testToken();
-      $("#ghMsg").textContent = "✅ 连接成功，正在同步…";
+      $("#ghMsg").textContent = "✅ 已连接，正在同步…";
       await doSync();
       if (!ENV.local && !booted) return boot2();
       viewSync();
@@ -678,7 +685,104 @@ function viewSync() {
   if ($("#ghOut")) $("#ghOut").onclick = () => { if (confirm("从这台设备删除令牌？（仓库里的记录不受影响）")) { setGhCfg(null); viewSync(); renderNav(); } };
   if ($("#syncNow")) $("#syncNow").onclick = async () => { await doSync(); viewSync(); };
   if ($("#clearCache")) $("#clearCache").onclick = async () => { await clearContentCache(); alert("已清除"); };
+  if ($("#resetAll")) $("#resetAll").onclick = async () => {
+    if (!confirm("确定清除全部学习记录，从头开始？")) return;
+    if (prompt("这一步不能撤销。请输入「清除」确认：") !== "清除") return;
+    S = { points: {}, stuck: [], days: {}, stuckDel: [], bmOk: S.bmOk, resetAt: Date.now() };
+    stampBaseline(S);
+    writeLocalState(S);
+    if (ghCfg()) await doSync();
+    location.hash = "#/";
+  };
 }
+
+// ---------------- 统计 ----------------
+function viewStats() {
+  const pts = (pt) => S.points[pt.id] || {};
+  const all = POINTS.map((pt) => ({ pt, p: pts(pt) }));
+  const mastered = all.filter((x) => x.p.status === "mastered").length;
+  const learning = all.filter((x) => x.p.status === "learning").length;
+  const sum = (f) => all.reduce((n, x) => n + f(x.p), 0);
+  const known = sum((p) => Object.values(p.cardStat || {}).filter((c) => c.known).length);
+  const tries = sum((p) => Object.values(p.cardStat || {}).reduce((n, c) => n + (c.ok || 0) + (c.ng || 0), 0));
+  const qOk = sum((p) => p.quiz?.ok || 0), qNg = sum((p) => p.quiz?.ng || 0);
+  const asks = sum((p) => (p.chat || []).filter((m) => m.role === "user").length);
+  const stuckOpen = S.stuck.filter((x) => !x.done).length, stuckDone = S.stuck.length - stuckOpen;
+  const dayKeys = Object.keys(S.days).sort();
+  const first = dayKeys[0];
+
+  // 最近 30 天每天的学习动作数
+  const days = Array.from({ length: 30 }, (_, i) => { const d = addDays(i - 29); return { d, n: S.days[d] || 0 }; });
+  const dMax = Math.max(1, ...days.map((x) => x.n));
+  // 连续学习天数
+  let streak = 0; for (let i = S.days[today()] ? 0 : 1; S.days[addDays(-i)]; i++) streak++; // 今天还没学也不算断
+  // 未来 14 天复习安排
+  const due = Array.from({ length: 14 }, (_, i) => { const d = addDays(i); return { d, n: all.filter((x) => x.p.review && (i === 0 ? x.p.review.due <= d : x.p.review.due === d)).length }; });
+  const dueMax = Math.max(1, ...due.map((x) => x.n));
+  const courses = BOOKS[0].courses.map((c) => {
+    const xs = all.filter((x) => x.pt.course === c.n);
+    return { c, total: xs.length,
+      m: xs.filter((x) => x.p.status === "mastered").length, l: xs.filter((x) => x.p.status === "learning").length,
+      known: xs.reduce((n, x) => n + Object.values(x.p.cardStat || {}).filter((k) => k.known).length, 0),
+      ok: xs.reduce((n, x) => n + (x.p.quiz?.ok || 0), 0), ng: xs.reduce((n, x) => n + (x.p.quiz?.ng || 0), 0) };
+  });
+  const kMax = Math.max(1, ...courses.map((x) => x.known));
+  const qMax = Math.max(1, ...courses.map((x) => x.ok + x.ng));
+  const md2 = (d) => d.slice(5).replace("-", "/");
+  const tile = (v, k, sub = "") => `<div class="stat"><div class="v">${v}${sub ? `<span class="muted small"> ${sub}</span>` : ""}</div><div class="k">${k}</div></div>`;
+  const colChart = (data, max, label) => `<div class="cols">${data.map((x) =>
+    `<div class="col" title="${x.d}：${label} ${x.n}"><div class="col-bar" style="height:${(x.n / max) * 100}%"></div>${x.n ? `<span class="col-v">${x.n}</span>` : ""}</div>`).join("")}</div>
+    <div class="cols-x"><span>${md2(data[0].d)}</span><span>${md2(data[Math.floor(data.length / 2)].d)}</span><span>${md2(data.at(-1).d)}</span></div>`;
+
+  $("#app").innerHTML = `<h1>📊 统计</h1>
+  <p class="muted small" style="margin-top:0">${first ? `从 ${first} 开始，已经学了 ${dayKeys.length} 天${streak ? `，连续 ${streak} 天` : ""}。` : "还没有学习记录。"}</p>
+  <div class="stats">
+    ${tile(mastered, "已掌握的ポイント", `/ ${POINTS.length}`)}
+    ${tile(learning, "学习中")}
+    ${tile(known, "闪卡已记住", `张 · 练 ${tries} 次`)}
+    ${tile(qOk + qNg ? Math.round((qOk / (qOk + qNg)) * 100) + "%" : "—", "真题正确率", qOk + qNg ? `${qOk}/${qOk + qNg}` : "")}
+    ${tile(asks, "问 AI 的次数")}
+    ${tile(stuckOpen, "没解决的卡点", stuckDone ? `· 已解决 ${stuckDone}` : "")}
+  </div>
+  <div class="card"><h2>最近 30 天学习量</h2><p class="small muted" style="margin-top:-6px">每天的学习动作数（打开新的一节、打分、做卡、问 AI、记录真题……）</p>${colChart(days, dMax, "学习动作")}</div>
+  <div class="card"><h2>各コース进度</h2>
+    <div class="legend" style="margin:-4px 0 10px"><span><i class="dot" style="background:var(--good)"></i>已掌握</span><span><i class="dot" style="background:var(--warn)"></i>学习中</span><span><i class="dot" style="background:var(--line)"></i>未学</span></div>
+    ${courses.map((x) => `<div class="hrow" title="${esc(x.c.title)}：已掌握 ${x.m}，学习中 ${x.l}，未学 ${x.total - x.m - x.l}">
+      <span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
+      <div class="hbar">${x.m ? `<i class="seg-m" style="flex:${x.m}"></i>` : ""}${x.l ? `<i class="seg-l" style="flex:${x.l}"></i>` : ""}${x.total - x.m - x.l ? `<i class="seg-n" style="flex:${x.total - x.m - x.l}"></i>` : ""}</div>
+      <span class="hv">${x.m}/${x.total}</span></div>`).join("")}
+  </div>
+  <div class="grid-2">
+    <div class="card"><h2>闪卡记住张数</h2>
+      ${courses.map((x) => `<div class="hrow" title="${esc(x.c.title)}：记住 ${x.known} 张"><span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
+        <div class="hbar single">${x.known ? `<i style="width:${(x.known / kMax) * 100}%"></i>` : ""}</div><span class="hv">${x.known}</span></div>`).join("")}
+    </div>
+    <div class="card"><h2>真题记录</h2>
+      <div class="legend" style="margin:-4px 0 10px"><span><i class="dot" style="background:var(--good)"></i>✅ 对</span><span><i class="dot" style="background:var(--bad)"></i>❌ 错</span></div>
+      ${courses.map((x) => `<div class="hrow" title="${esc(x.c.title)}：对 ${x.ok}，错 ${x.ng}"><span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
+        <div class="hbar single">${x.ok + x.ng ? `<span style="display:flex;gap:2px;width:${((x.ok + x.ng) / qMax) * 100}%">${x.ok ? `<i class="ok" style="flex:${x.ok}"></i>` : ""}${x.ng ? `<i class="ng" style="flex:${x.ng}"></i>` : ""}</span>` : ""}</div>
+        <span class="hv">${x.ok + x.ng ? `${x.ok}/${x.ok + x.ng}` : "—"}</span></div>`).join("")}
+    </div>
+  </div>
+  <div class="card"><h2>接下来 14 天要复习</h2><p class="small muted" style="margin-top:-6px">第一根包括今天和已经过期的。</p>${colChart(due, dueMax, "要复习")}</div>`;
+}
+
+// ---------------- 主题 ----------------
+function applyTheme() {
+  const t = document.documentElement.dataset.theme
+    || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  $("#themeBtn").textContent = t === "dark" ? "☀️" : "🌙";
+  $("#themeBtn").title = t === "dark" ? "切换到浅色" : "切换到深色";
+  return t;
+}
+$("#themeBtn").onclick = () => {
+  const next = applyTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("takken.theme", next); } catch {}
+  applyTheme();
+};
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
+applyTheme();
 
 // ---------------- 启动 ----------------
 let booted = false;
