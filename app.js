@@ -1,6 +1,6 @@
-import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=e67b54dc96";
+import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=9f642bb8a8";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=e67b54dc96";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=9f642bb8a8";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -187,7 +187,7 @@ async function viewPoint(id, opts = {}) {
       </div>
       <div class="card">
         <div class="row"><h2 style="margin:0">📝 真题练习</h2><span class="spacer"></span>${dojoSummary(pt)}</div>
-        ${pt.dojo ? `<p class="small" style="margin:10px 0">本节对应「${pt.dojo.n}. ${esc(pt.dojo.name)}」分野。点按钮跳过去 → 点书签栏的 <b>📌 宅建</b> 直接开始；<b>做完一批不想做了，再点一次 📌 宅建</b>，一問一答的对错就自动记回来。</p>` : ""}
+        ${pt.dojo ? `<p class="small" style="margin:10px 0">本节对应「${pt.dojo.n}. ${esc(pt.dojo.name)}」分野。点按钮跳过去 → 点书签栏的 <b>📌 宅建</b> 直接开始；<b>做完一批不想做了，再点一次 📌 宅建</b>，一問一答的对错就自动记回来（过去问记不回来，用下面的 ✅ / ❌ 手动记）。</p>` : ""}
         ${bmInstalled() ? "" : `<p class="small" style="margin:0 0 10px">还没装 📌 宅建 书签？去 <a href="#/sync">☁️ 同步</a> 页面装一下。</p>`}
         <div class="row">
           <button class="btn primary" data-dojo="marubatu">一問一答（○×）↗</button>
@@ -311,7 +311,8 @@ function bmSetupHtml() {
   return `<ol class="bm-steps">
     <li>按 <kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>（Windows 是 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>）显示书签栏</li>
     <li>把这个按钮<b>拖到书签栏</b>上 → <a class="bm-link" href="${esc(bookmarklet())}" onclick="alert('不要点它，把它拖到书签栏上。');return false">📌 宅建</a></li>
-    <li>用法：课程页点题目按钮跳过去 → 点 <b>📌 宅建</b> 直接开始；做完一批，再点一次 <b>📌 宅建</b>，一問一答的对错自动记回来</li>
+    <li>跳过去：课程页点「一問一答」或「过去问」按钮 → 到那边点 <b>📌 宅建</b>，自动选好这一节的分野开始出题（两种都可以）</li>
+    <li>记回来：<b>一問一答</b>做完一批，再点一次 <b>📌 宅建</b>，对错自动记回来；<b>过去问</b>的成绩存在对方服务器上，书签读不到，做完在课程页「真题练习」里手动点 ✅ / ❌</li>
   </ol>`;
 }
 // 新设备（这个浏览器还没确认装过书签）：弹窗提示先装书签。手机/平板拖不了书签，不弹。
