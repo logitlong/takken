@@ -176,3 +176,12 @@ kbd { font: 12px ui-monospace, monospace; border: 1px solid var(--line); border-
 .ai-dot.off { cursor: default; } .ai-dot.off .dot { background: var(--line); }
 .no-ai-note { font-size: 13px; color: var(--muted); background: var(--code); border-radius: 10px; padding: 10px 12px; line-height: 1.6; }
 input.btn { cursor: text; font-size: 16px; }
+
+/* 手机：标题和 AI 状态一行，导航单独一行可横向滑动 */
+@media (max-width: 640px) {
+  .top-in { flex-wrap: wrap; gap: 6px 4px; padding: 8px 12px 6px; overflow: visible; }
+  .brand { margin-right: auto; }
+  .ai-dot { order: 1; margin-left: 0; }
+  .nav { order: 2; width: 100%; flex-wrap: nowrap; overflow-x: auto; gap: 2px; -webkit-overflow-scrolling: touch; }
+  .nav a { padding: 6px 10px; }
+}
