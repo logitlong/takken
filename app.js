@@ -564,7 +564,7 @@ async function send(text) {
 async function streamAI(body, onText) {
   let text = "";
   try {
-    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const res = await fetch(`${ENV.aiBase}/api/chat`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const reader = res.body.getReader(), dec = new TextDecoder();
     let pending = false;
     for (;;) {
@@ -586,13 +586,13 @@ const AI_LABEL = {
   limited: ["warn", "Claude 额度用完", "套餐额度暂时用完，过一会儿再试"],
   logged_out: ["bad", "Claude 未登录", "在终端运行一次 claude（Claude Code）用你的账号登录，然后点这里重新检查"],
   error: ["bad", "Claude 连不上", "检查失败"],
-  offline: ["bad", "本地服务没开", "终端里运行 npm start 启动网站服务"],
+  offline: ["bad", "本地服务没开", "终端里运行 npm start 启动本机服务（线上版也靠它连 Claude）"],
 };
 async function refreshAI(force = false) {
   const el = $("#aiStatus");
   if (force) { el.className = "ai-dot checking"; el.querySelector(".txt").textContent = "Claude 检查中…"; }
   let s;
-  try { s = await fetch(`/api/ai-status${force ? "?force" : ""}`).then((r) => r.json()); }
+  try { s = await fetch(`${ENV.aiBase}/api/ai-status${force ? "?force" : ""}`).then((r) => r.json()); }
   catch { s = { state: "offline" }; }
   const [cls, txt, tip] = AI_LABEL[s.state] || AI_LABEL.error;
   el.className = `ai-dot ${cls}`;
@@ -685,7 +685,7 @@ function viewSync() {
   const chats = pts.reduce((n, p) => n + (p.chat?.length || 0), 0);
   $("#app").innerHTML = `<h1>☁️ 同步</h1>
   <div class="card kv">
-    <div><span>当前设备</span><b>${ENV.ai ? "💻 电脑（AI 可用）" : "📱 其他设备（无 AI）"}</b></div>
+    <div><span>当前设备</span><b>${ENV.local ? "💻 电脑 · 本地版（AI 可用）" : ENV.ai ? "💻 电脑 · 线上版（AI 借本机服务）" : "📱 其他设备（无 AI）"}</b></div>
     <div><span>同步</span><b>${esc(syncTip())}</b>${c ? `<button class="btn sm" id="syncNow">立即同步</button>` : ""}</div>
     <div><span>学习记录</span><b>${booted ? `学过 ${learned} 节 · 掌握 ${mastered} 节 · 闪卡记住 ${cards} 张 · 对话 ${chats} 条 · 学习 ${Object.keys(S.days).length} 天` : "—"}</b></div>
   </div>

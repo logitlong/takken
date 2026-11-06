@@ -2,7 +2,9 @@
 // - 电脑上（本地服务 npm start）：内容走本地 /api，AI 可用；填了令牌就把学习记录同步到 GitHub。
 // - 手机/其他设备（GitHub Pages）：内容用令牌从私有仓库读取（并缓存在本机），学习记录同步到 GitHub；没有 AI。
 
-export const ENV = { local: false, ai: false };
+// aiBase：AI 接口的地址。本地版是同一个服务（""）；线上版在电脑上时借本机服务 http://127.0.0.1:4173
+export const ENV = { local: false, ai: false, aiBase: "" };
+const LOCAL_AI = "http://127.0.0.1:4173";
 export const DEFAULT_REPO = "logitlong/takken-study";
 const CONTENT_REF = "main", PROGRESS_REF = "progress", PROGRESS_FILE = "progress.json";
 const K = { cfg: "takken.gh", state: "takken.state" };
@@ -21,6 +23,15 @@ export async function detectEnv() {
     try {
       const h = await fetch("/api/health").then((r) => r.json());
       if (h.ai) { ENV.local = true; ENV.ai = true; }
+    } catch {}
+    return ENV;
+  }
+  // 线上版：电脑上（非触屏）试一下本机服务开没开，开了就用它的 Claude。手机不试。
+  const touchOnly = matchMedia("(pointer: coarse)").matches && !matchMedia("(pointer: fine)").matches;
+  if (!touchOnly) {
+    try {
+      const h = await fetch(`${LOCAL_AI}/api/health`, { signal: AbortSignal.timeout(2500), cache: "no-store" }).then((r) => r.json());
+      if (h.ai) { ENV.ai = true; ENV.aiBase = LOCAL_AI; }
     } catch {}
   }
   return ENV;
