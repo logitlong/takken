@@ -1,5 +1,5 @@
 import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js";
-import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
+import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
   loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js";
 
 // ---------------- 状态 ----------------
@@ -893,7 +893,16 @@ async function boot2() {
   // 外部设备：没有令牌就只能先去填令牌
   if (!ENV.local && !ghCfg()) { renderNav(); location.hash = "#/sync"; viewSync(); return; }
   await boot2();
-  // 线上版在电脑上：本机服务开着就切到「有 AI」
+  // 线上版在电脑上：本机服务开着就切到「有 AI」；Chrome 还没给「本地网络访问」权限时提示一下
+  if (!ENV.local && !isTouch()) localNetPermission().then((st) => {
+    if (ENV.ai || (st !== "prompt" && st !== "denied")) return;
+    const el = $("#aiStatus");
+    el.className = "ai-dot warn";
+    el.querySelector(".txt").textContent = st === "denied" ? "Chrome 拦住了本机 Claude" : "等你允许连接本机 Claude";
+    el.title = st === "denied"
+      ? "Chrome 拒绝了这个网站访问本机服务。点地址栏左边的图标 → 网站设置 → 本地网络访问 → 允许，然后刷新。"
+      : "Chrome 会弹出「访问此设备上的其他应用和服务」，点允许就能用电脑上的 Claude。没看到弹窗：点地址栏左边的图标 → 本地网络访问 → 允许，然后刷新。";
+  });
   if (!ENV.local) probeLocalAI().then((ok) => {
     if (!ok) return;
     document.body.classList.remove("no-ai");

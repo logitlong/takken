@@ -29,6 +29,13 @@ export async function detectEnv() {
 }
 // 线上版：电脑上（非触屏）在后台试一下本机服务开没开，开了就用它的 Claude。手机不试。
 // 第一次 Chrome 会问「允许访问此设备上的其他应用和服务」，点允许之前请求会一直挂着，所以不阻塞页面、等久一点。
+// Chrome「本地网络访问」权限：prompt（还没点）/ granted / denied；不支持时返回 ""
+export async function localNetPermission() {
+  for (const name of ["loopback-network", "local-network-access"]) {
+    try { return (await navigator.permissions.query({ name })).state; } catch {}
+  }
+  return "";
+}
 export async function probeLocalAI() {
   if (ENV.local || ENV.ai) return ENV.ai;
   const touchOnly = matchMedia("(pointer: coarse)").matches && !matchMedia("(pointer: fine)").matches;
