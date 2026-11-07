@@ -315,3 +315,10 @@ a.kk-book:hover { border-color: var(--accent); }
 .stuck-qa summary { cursor: pointer; color: var(--accent); }
 .stuck-q { margin: 8px 0 6px; padding: 8px 10px; background: var(--code); border-radius: 8px; font-size: 14px; }
 .stuck-a { padding: 4px 10px; border-left: 3px solid var(--accent-soft); font-size: 14px; overflow-x: auto; }
+/* 卡点本：筛选 + 分组 */
+.stuck-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+.stuck-filter #sfQ { flex: 1 1 240px; min-width: 0; }
+.stuck-filter select { max-width: 220px; }
+.stuck-group { margin-top: 10px; }
+.stuck-gh { font-weight: 600; font-size: 14px; padding: 6px 0; border-bottom: 2px solid var(--line); }
+mark { background: var(--hl); color: inherit; border-radius: 3px; padding: 0 1px; }

@@ -1,7 +1,7 @@
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=e3b74a57d1";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=3a93539706";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=e3b74a57d1";
-import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=e3b74a57d1";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=3a93539706";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=3a93539706";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -696,31 +696,88 @@ function stuckQA(s) {
   const i = chat.findIndex((m, j) => m.role === "user" && chat[j + 1]?.role === "assistant" && (m.content.startsWith(key) || m.content.includes(key)));
   return i >= 0 ? { q: chat[i].content, a: chat[i + 1].content } : null;
 }
+// 筛选条件留在本机（换页回来还在）
+let SF = { book: "", course: "", st: "open", q: "" };
+try { SF = { ...SF, ...JSON.parse(localStorage.getItem("takken.stuckFilter") || "{}") }; } catch {}
+const saveSF = () => { try { localStorage.setItem("takken.stuckFilter", JSON.stringify(SF)); } catch {} };
 function viewStuck() {
-  const list = S.stuck;
+  const all = S.stuck;
+  const nOpen = all.filter((s) => !s.done).length;
+  const books = BOOKS.filter((b) => b.courses.length);
+  const courseOpts = (BOOK_BY_ID[SF.book]?.courses || []);
   $("#app").innerHTML = `<h1>卡点本</h1>
   <p class="muted small" style="margin-top:0">暂时想不通的地方记在这里。点「去问 AI」会回到那一节，并把问题填进输入框。</p>
   <div class="card">
-    <div class="row" style="margin-bottom:10px">
-      <select id="newPt" class="btn" style="max-width:260px">${POINTS.map((pt) => `<option value="${pt.id}">${esc(pt.courseTitle)} › ${esc(pt.title)}</option>`).join("")}</select>
+    <div class="row">
+      <select id="newPt" class="btn" style="max-width:260px">${POINTS.map((pt) => `<option value="${pt.id}">${esc(pt.bookTitle)} › ${esc(pt.courseTitle)} › ${esc(pt.title)}</option>`).join("")}</select>
       <input id="newTxt" class="btn" style="flex:1;min-width:200px" placeholder="哪里没懂？">
       <button class="btn primary" id="addStuck">添加</button>
     </div>
-    ${list.length ? list.map((s) => { const pt = POINT_BY_ID[s.pointId], qa = stuckQA(s); return `
-      <div class="stuck-item ${s.done ? "done" : ""}">
-        <input type="checkbox" data-done="${s.id}" ${s.done ? "checked" : ""} title="已解决">
-        <div style="flex:1;min-width:0"><div class="txt">${esc(s.text)}</div><div class="small muted">${s.created} · <a href="#/p/${s.pointId}">${esc(pt?.courseTitle)} › ${esc(pt?.title)}</a></div>
-          ${qa ? `<details class="stuck-qa"><summary class="small">💬 当初的问答</summary>
-            ${qa.q ? `<div class="stuck-q"><b>我问：</b>${esc(qa.q).replace(/\n/g, "<br>")}</div>` : ""}
-            <div class="stuck-a md">${md(qa.a)}</div></details>` : ""}</div>
-        <button class="btn sm" data-ask="${s.id}">去问 AI</button><button class="btn sm" data-del="${s.id}">删除</button>
-      </div>`; }).join("") : `<div class="empty">还没有卡点。</div>`}
+  </div>
+  <div class="card">
+    <div class="stuck-filter">
+      <input id="sfQ" class="btn" type="search" placeholder="🔍 关键词（卡点、我的提问、AI 回答里都会搜）" value="${esc(SF.q)}">
+      <div class="seg" id="sfSt">${[["open", `未解决 ${nOpen}`], ["done", `已解决 ${all.length - nOpen}`], ["all", `全部 ${all.length}`]].map(([k, v]) => `<button data-st="${k}" class="${SF.st === k ? "on learning" : ""}">${v}</button>`).join("")}</div>
+      <select id="sfBook" class="btn"><option value="">全部科目</option>${books.map((b) => `<option value="${b.id}" ${SF.book === b.id ? "selected" : ""}>${esc(b.title)}</option>`).join("")}</select>
+      <select id="sfCourse" class="btn" ${courseOpts.length ? "" : "disabled"}><option value="">全部コース</option>${courseOpts.map((c) => `<option value="${c.n}" ${String(SF.course) === String(c.n) ? "selected" : ""}>第${c.n}コース ${esc(c.title)}</option>`).join("")}</select>
+      ${SF.q || SF.book || SF.st !== "open" ? `<a href="javascript:void 0" id="sfReset" class="small">清除筛选</a>` : ""}
+    </div>
+    <div id="stuckList"></div>
   </div>`;
+  renderStuckList();
   const find = (id) => S.stuck.find((s) => s.id == id);
   $("#addStuck").onclick = () => { const t = $("#newTxt").value.trim(); if (!t) return; S.stuck.unshift({ id: Date.now(), pointId: $("#newPt").value, text: t, created: today(), done: false }); save(); viewStuck(); };
-  document.querySelectorAll("[data-done]").forEach((c) => c.onchange = () => { find(c.dataset.done).done = c.checked; save(); viewStuck(); });
-  document.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => { S.stuck = S.stuck.filter((s) => s.id != b.dataset.del); S.stuckDel.push(Number(b.dataset.del)); save(); viewStuck(); });
-  document.querySelectorAll("[data-ask]").forEach((b) => b.onclick = () => { const s = find(b.dataset.ask); pendingAsk = `我在这里卡住了：${s.text}\n请帮我讲清楚。`; location.hash = `#/p/${s.pointId}`; });
+  // 关键词：只刷新列表，输入框不丢焦点
+  $("#sfQ").oninput = (e) => { SF.q = e.target.value; saveSF(); renderStuckList(); };
+  $("#sfSt").onclick = (e) => { const b = e.target.closest("[data-st]"); if (b) { SF.st = b.dataset.st; saveSF(); viewStuck(); } };
+  $("#sfBook").onchange = (e) => { SF.book = e.target.value; SF.course = ""; saveSF(); viewStuck(); };
+  $("#sfCourse").onchange = (e) => { SF.course = e.target.value; saveSF(); viewStuck(); };
+  if ($("#sfReset")) $("#sfReset").onclick = () => { SF = { book: "", course: "", st: "open", q: "" }; saveSF(); viewStuck(); };
+  $("#stuckList").onchange = (e) => { const c = e.target.closest("[data-done]"); if (c) { find(c.dataset.done).done = c.checked; save(); viewStuck(); } };
+  $("#stuckList").onclick = (e) => {
+    const del = e.target.closest("[data-del]"), ask = e.target.closest("[data-ask]");
+    if (del && confirm("删除这个卡点？")) { S.stuck = S.stuck.filter((s) => s.id != del.dataset.del); S.stuckDel.push(Number(del.dataset.del)); save(); viewStuck(); }
+    if (ask) { const s = find(ask.dataset.ask); pendingAsk = `我在这里卡住了：${s.text}\n请帮我讲清楚。`; location.hash = `#/p/${s.pointId}`; }
+  };
+}
+function renderStuckList() {
+  const kw = SF.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = (s) => {
+    const pt = POINT_BY_ID[s.pointId];
+    if (SF.st === "open" && s.done) return false;
+    if (SF.st === "done" && !s.done) return false;
+    if (SF.book && pt?.book !== SF.book) return false;
+    if (SF.course && String(pt?.course) !== String(SF.course)) return false;
+    if (!kw.length) return true;
+    const qa = stuckQA(s);
+    const hay = [s.text, qa?.q, qa?.a, pt?.title, pt?.courseTitle].join("\n").toLowerCase();
+    return kw.every((k) => hay.includes(k)); // 多个词用空格隔开 = 都要包含
+  };
+  const list = S.stuck.filter(hit);
+  // 按 科目 › コース 分组，组内按ポイント顺序、再按时间新→旧
+  const order = new Map(POINTS.map((p, i) => [p.id, i]));
+  list.sort((a, b) => (order.get(a.pointId) ?? 1e9) - (order.get(b.pointId) ?? 1e9) || b.id - a.id);
+  const groups = [];
+  for (const s of list) {
+    const pt = POINT_BY_ID[s.pointId];
+    const g = pt ? `${pt.bookTitle} › 第${pt.course}コース ${pt.courseTitle}` : "其他";
+    if (groups.at(-1)?.g !== g) groups.push({ g, items: [] });
+    groups.at(-1).items.push(s);
+  }
+  const mark = (t) => { let h = esc(t); for (const k of kw) h = h.replace(new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/&/g, "&amp;").replace(/</g, "&lt;"), "gi"), (m) => `<mark>${m}</mark>`); return h; };
+  $("#stuckList").innerHTML = !S.stuck.length ? `<div class="empty">还没有卡点。</div>`
+    : !list.length ? `<div class="empty">没有符合条件的卡点。</div>`
+    : `<p class="small muted" style="margin:4px 0 0">共 ${list.length} 条</p>` + groups.map(({ g, items }) => `<div class="stuck-group"><div class="stuck-gh">${esc(g)}<span class="muted small">　${items.length}</span></div>
+      ${items.map((s) => { const pt = POINT_BY_ID[s.pointId], qa = stuckQA(s);
+        const inQA = kw.length && qa && kw.some((k) => `${qa.q}\n${qa.a}`.toLowerCase().includes(k)) && !kw.every((k) => s.text.toLowerCase().includes(k));
+        return `<div class="stuck-item ${s.done ? "done" : ""}">
+        <input type="checkbox" data-done="${s.id}" ${s.done ? "checked" : ""} title="已解决">
+        <div style="flex:1;min-width:0"><div class="txt">${mark(s.text)}</div><div class="small muted">${s.created} · <a href="#/p/${s.pointId}">${esc(pt?.title)}</a></div>
+          ${qa ? `<details class="stuck-qa" ${inQA ? "open" : ""}><summary class="small">💬 当初的问答${inQA ? "（关键词在这里）" : ""}</summary>
+            ${qa.q ? `<div class="stuck-q"><b>我问：</b>${mark(qa.q).replace(/\n/g, "<br>")}</div>` : ""}
+            <div class="stuck-a md">${md(qa.a)}</div></details>` : ""}</div>
+        <button class="btn sm" data-ask="${s.id}">去问 AI</button><button class="btn sm" data-del="${s.id}">删除</button>
+      </div>`; }).join("")}</div>`).join("");
 }
 let pendingAsk = null;
 
