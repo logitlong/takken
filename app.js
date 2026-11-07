@@ -1,7 +1,7 @@
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=3a93539706";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=67aa790b02";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=3a93539706";
-import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=3a93539706";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=67aa790b02";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=67aa790b02";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -709,7 +709,9 @@ function viewStuck() {
   <p class="muted small" style="margin-top:0">暂时想不通的地方记在这里。点「去问 AI」会回到那一节，并把问题填进输入框。</p>
   <div class="card">
     <div class="row">
-      <select id="newPt" class="btn" style="max-width:260px">${POINTS.map((pt) => `<option value="${pt.id}">${esc(pt.bookTitle)} › ${esc(pt.courseTitle)} › ${esc(pt.title)}</option>`).join("")}</select>
+      <select id="newBook" class="btn">${BOOKS.map((b) => `<option value="${b.id}" ${b.courses.length ? "" : "disabled"}>${esc(b.title)}${b.courses.length ? "" : "（待导入）"}</option>`).join("")}</select>
+      <select id="newCourse" class="btn" style="max-width:200px"></select>
+      <select id="newPt" class="btn" style="max-width:220px"></select>
       <input id="newTxt" class="btn" style="flex:1;min-width:200px" placeholder="哪里没懂？">
       <button class="btn primary" id="addStuck">添加</button>
     </div>
@@ -725,6 +727,24 @@ function viewStuck() {
     <div id="stuckList"></div>
   </div>`;
   renderStuckList();
+  // 添加卡点：科目 → コース → ポイント 三级选择（默认跟着上面的筛选 / 上次选的）
+  const fillCourse = () => {
+    const b = BOOK_BY_ID[$("#newBook").value];
+    $("#newCourse").innerHTML = b.courses.map((c) => `<option value="${c.n}">第${c.n}コース ${esc(c.title)}</option>`).join("");
+  };
+  const fillPt = () => {
+    const pts = POINTS.filter((p) => p.book === $("#newBook").value && String(p.course) === $("#newCourse").value);
+    $("#newPt").innerHTML = pts.map((p) => `<option value="${p.id}">${"❶❷❸❹❺❻❼❽"[p.n - 1] || p.n} ${esc(p.title)}</option>`).join("");
+  };
+  const last = POINT_BY_ID[S.stuck[0]?.pointId];
+  const book0 = SF.book || last?.book || BOOKS.find((b) => b.courses.length).id;
+  $("#newBook").value = book0; fillCourse();
+  const c0 = SF.course || (last?.book === book0 ? last.course : "");
+  if (c0) $("#newCourse").value = String(c0);
+  fillPt();
+  if (last && last.book === book0 && String(last.course) === $("#newCourse").value) $("#newPt").value = last.id;
+  $("#newBook").onchange = () => { fillCourse(); fillPt(); };
+  $("#newCourse").onchange = fillPt;
   const find = (id) => S.stuck.find((s) => s.id == id);
   $("#addStuck").onclick = () => { const t = $("#newTxt").value.trim(); if (!t) return; S.stuck.unshift({ id: Date.now(), pointId: $("#newPt").value, text: t, created: today(), done: false }); save(); viewStuck(); };
   // 关键词：只刷新列表，输入框不丢焦点
