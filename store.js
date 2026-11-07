@@ -109,9 +109,9 @@ export async function loadGen(id) {
 }
 
 // 过去问题库（tools/kakomon.mjs 生成）
-export async function loadKakomon() {
-  if (ENV.local) return fetch("/api/kakomon").then((r) => (r.ok ? r.json() : null));
-  const t = await repoFile("data/kakomon/kenri.json", "text");
+export async function loadKakomon(book) {
+  if (ENV.local) return fetch(`/api/kakomon/${book}`).then((r) => (r.ok ? r.json() : null));
+  const t = await repoFile(`data/kakomon/${book}.json`, "text");
   return t ? JSON.parse(t) : null;
 }
 
@@ -124,7 +124,7 @@ export async function loadLocalState() {
 }
 function norm(s) {
   s ||= {};
-  s.points ||= {}; s.stuck ||= []; s.days ||= {}; s.stuckDel ||= []; s.dojoLog ||= []; s.kkLog ||= [];
+  s.points ||= {}; s.stuck ||= []; s.days ||= {}; s.stuckDel ||= []; s.dojoLog ||= []; s.kkLog ||= []; s.mocks ||= [];
   return s;
 }
 export function writeLocalState(S) {
@@ -149,7 +149,7 @@ export function stamp(S) {
 function afterReset(x, R) {
   if ((x.resetAt || 0) >= R) return x;
   const keep = (o) => (o.t || 0) > R;
-  return { ...x, resetAt: R, days: {}, stuckDel: x.stuckDel, dojoLog: x.dojoLog.filter((e) => e[3] * 1000 > R), kkLog: x.kkLog.filter((e) => e[2] * 1000 > R),
+  return { ...x, resetAt: R, days: {}, stuckDel: x.stuckDel, dojoLog: x.dojoLog.filter((e) => e[3] * 1000 > R), kkLog: x.kkLog.filter((e) => e[2] * 1000 > R), mocks: x.mocks.filter((e) => e.t * 1000 > R),
     points: Object.fromEntries(Object.entries(x.points).filter(([, p]) => keep(p))), stuck: x.stuck.filter(keep) };
 }
 export function merge(a, b) {
@@ -163,6 +163,9 @@ export function merge(a, b) {
   // 站内过去问作答：同样合并去重（key+时间+对错）
   const seen2 = new Set();
   out.kkLog = [...a.kkLog, ...b.kkLog].filter((e) => { const k = `${e[0]}@${e[2]}@${e[1]}`; return !seen2.has(k) && seen2.add(k); }).sort((x, y) => x[2] - y[2]);
+  const seen3 = new Set();
+  out.mocks = [...a.mocks, ...b.mocks].filter((e) => !seen3.has(e.t + e.title) && seen3.add(e.t + e.title)).sort((x, y) => x.t - y.t);
+  out.plan = (b.plan?.t || 0) > (a.plan?.t || 0) ? b.plan : a.plan;
   for (const id of new Set([...Object.keys(a.points), ...Object.keys(b.points)])) {
     const x = a.points[id], y = b.points[id];
     out.points[id] = !x ? y : !y ? x : (y.t || 0) > (x.t || 0) ? y : x;

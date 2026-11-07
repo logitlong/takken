@@ -1,7 +1,7 @@
-import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=98bec0596e";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=54dc5fc89f";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=98bec0596e";
-import { initKK, viewKK, viewRun, viewWrong, fillPointCard, wrongKeys, kkTotals, courseAccuracy } from "./quiz.js?v=98bec0596e";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=54dc5fc89f";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=54dc5fc89f";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -50,7 +50,7 @@ async function doSync() {
 }
 function touchDay() { S.days[today()] = (S.days[today()] || 0) + 1; }
 
-initKK({ S: () => S, save, touchDay: () => touchDay(), $: (s, el) => $(s, el), esc: (x) => esc(x), md: (x) => md(x), addDays: (n) => addDays(n), P: (id) => P(id) });
+initKK({ S: () => S, save, touchDay: () => touchDay(), $: (s, el) => $(s, el), esc: (x) => esc(x), md: (x) => md(x), addDays: (n) => addDays(n), today: () => today() });
 
 const statusOf = (id) => S.points[id]?.status || "new";
 const impOf = (pt) => S.points[pt.id]?.imp || pt.imp;
@@ -87,72 +87,117 @@ function renderNav() {
 }
 
 // ---------------- 首页 ----------------
+const planOf = () => (S.plan ||= { by: "2027-02-28", ox: 20 });
+function bookStat(b) {
+  const pts = POINTS.filter((p) => p.book === b.id);
+  return { pts, total: pts.length, m: pts.filter((p) => statusOf(p.id) === "mastered").length, l: pts.filter((p) => statusOf(p.id) === "learning").length };
+}
+function todayTasks() {
+  const plan = planOf();
+  const fresh = POINTS.filter((p) => statusOf(p.id) === "new");
+  const startedToday = POINTS.filter((p) => S.points[p.id]?.started === today()).length;
+  const daysLeft = Math.max(1, daysBetween(today(), plan.by) + 1);
+  const newPerDay = fresh.length + startedToday ? Math.ceil((fresh.length + startedToday) / daysLeft) : 0;
+  const kt = kkToday(), due = dueList().length, wrong = wrongKeys().length;
+  const lm = lastMock(), mockAgo = lm ? Math.floor((Date.now() / 1000 - lm.t) / 86400) : null;
+  const tasks = [];
+  if (newPerDay) tasks.push({ done: startedToday >= newPerDay, text: `学新课 <b>${Math.min(startedToday, newPerDay)} / ${newPerDay}</b> 节`, sub: `还剩 ${fresh.length} 节未学，${plan.by} 前学完`, href: fresh[0] ? `#/p/${fresh[0].id}` : "#/toc", btn: "去学" });
+  tasks.push({ done: !due, text: due ? `复习 <b>${due}</b> 节` : "复习：今天没有要复习的", href: "#/review", btn: "去复习" });
+  tasks.push({ done: kt.ox >= plan.ox, text: `一問一答 ○× <b>${Math.min(kt.ox, plan.ox)} / ${plan.ox}</b> 肢`, sub: kt.q ? `另外做了四选一 ${kt.q} 题` : "", href: "#/kk", btn: "去做题" });
+  tasks.push({ done: !wrong, text: wrong ? `错题本还有 <b>${wrong}</b> 个待重做` : "错题本：清空了", href: "#/kk/wrong", btn: "去重做" });
+  tasks.push({ done: mockAgo !== null && mockAgo < 7, text: "每周一次模考", sub: lm ? `上次 ${mockAgo === 0 ? "今天" : `${mockAgo} 天前`}：${esc(lm.title)} ${lm.score}/${lm.n}` : "还没做过模考", href: "#/kk", btn: "去模考" });
+  return tasks;
+}
 function viewHome() {
-  const total = POINTS.length;
-  const m = POINTS.filter((p) => statusOf(p.id) === "mastered").length;
-  const l = POINTS.filter((p) => statusOf(p.id) === "learning").length;
   const left = daysBetween(today(), EXAM_DATE);
   const next = POINTS.find((p) => statusOf(p.id) === "learning") || POINTS.find((p) => statusOf(p.id) === "new");
-  // 书里建议：11 月开始的话，2 月底前学完权利关系
-  const target = "2027-02-28";
-  const remain = total - m;
-  const perWeek = remain ? Math.ceil(remain / Math.max(1, daysBetween(today(), target) / 7)) : 0;
   const studyDays = Object.keys(S.days).length;
+  const m = POINTS.filter((p) => statusOf(p.id) === "mastered").length;
+  const tasks = todayTasks(), nDone = tasks.filter((t) => t.done).length;
+  const plan = planOf();
+  const kt = kkTotals();
 
   $("#app").innerHTML = `
   <div class="stats">
     <div class="stat"><div class="v">${left}</div><div class="k">天后考试（${EXAM_DATE}）</div></div>
-    <div class="stat"><div class="v">${m}<span class="muted small"> / ${total}</span></div><div class="k">权利关系 已掌握</div></div>
+    <div class="stat"><div class="v">${m}<span class="muted small"> / ${POINTS.length}</span></div><div class="k">已掌握的ポイント（已导入部分）</div></div>
     <div class="stat"><div class="v">${dueList().length}</div><div class="k">今天要复习</div></div>
-    <div class="stat"><div class="v">${openStuck().length}</div><div class="k">没解决的卡点</div></div>
+    <div class="stat"><div class="v">${kt.n ? Math.round((kt.ok / kt.n) * 100) + "%" : "—"}</div><div class="k">过去问正确率${kt.n ? `（${kt.n} 次）` : ""}</div></div>
+  </div>
+  <div class="card">
+    <div class="row"><h2 style="margin:0">📅 今日计划</h2><span class="spacer"></span><span class="muted small">完成 ${nDone} / ${tasks.length}</span></div>
+    <div class="plan">${tasks.map((t) => `<div class="plan-row ${t.done ? "done" : ""}"><span class="plan-ck">${t.done ? "✅" : "⬜"}</span>
+      <div style="flex:1"><div>${t.text}</div>${t.sub ? `<div class="small muted">${t.sub}</div>` : ""}</div>
+      ${t.done ? "" : `<a class="btn sm" href="${t.href}">${t.btn}</a>`}</div>`).join("")}</div>
+    <details class="small" style="margin-top:8px"><summary class="muted">调整计划</summary>
+      <div class="row" style="margin-top:8px">
+        <label>已导入的课在 <input type="date" id="planBy" class="btn sm" value="${plan.by}"> 前学完</label>
+        <label>每天 ○× <input type="number" id="planOx" class="btn sm" min="0" max="200" step="5" value="${plan.ox}" style="width:70px"> 肢</label>
+      </div>
+      <p class="muted" style="margin:6px 0 0">新课数 = 剩下没学的节数 ÷ 剩余天数，每天自动重算。复习按 1、3、7、14、30、60 天安排；做错的题对应的已掌握ポイント会排到第二天回炉。</p>
+    </details>
   </div>
   <div class="card">
     <div class="row"><h2 style="margin:0">继续学习</h2><span class="spacer"></span><span class="muted small">已学习 ${studyDays} 天</span></div>
-    ${next ? `<p style="margin:8px 0 12px">第${next.course}コース「${esc(next.courseTitle)}」 › <b>第${next.n}ポイント ${esc(next.title)}</b></p>
-      <a class="btn primary" href="#/p/${next.id}">开始这一节 →</a>` : `<p>🎉 权利关系全部掌握了！</p>`}
+    ${next ? `<p style="margin:8px 0 12px">${esc(next.bookTitle)} › 第${next.course}コース「${esc(next.courseTitle)}」 › <b>第${next.n}ポイント ${esc(next.title)}</b></p>
+      <a class="btn primary" href="#/p/${next.id}">开始这一节 →</a>` : `<p>🎉 已导入的部分全部掌握了！</p>`}
   </div>
   <div class="card">
-    <div class="row"><h2 style="margin:0">📝 过去问</h2><span class="spacer"></span><span class="muted small">${(() => { const t = kkTotals(); return t.n ? `累计作答 ${t.n} 次 · 正确率 ${Math.round((t.ok / t.n) * 100)}%` : "还没做过"; })()}</span></div>
-    <p style="margin:8px 0 12px">官方真题 令和2〜7年 権利関係，逐肢中文解析。${wrongKeys().length ? `错题本里有 <b>${wrongKeys().length}</b> 个待重做。` : ""}</p>
-    <a class="btn primary" href="#/kk">去做题 →</a>
-  </div>
-  <div class="card">
-    <h2>权利关系 进度</h2>
-    <div class="bar"><i class="m" style="width:${(m / total) * 100}%"></i><i class="l" style="width:${(l / total) * 100}%"></i></div>
-    <div class="legend"><span><i class="dot" style="background:var(--good)"></i>已掌握 ${m}</span><span><i class="dot" style="background:var(--warn)"></i>学习中 ${l}</span><span><i class="dot" style="background:var(--line)"></i>未学 ${total - m - l}</span></div>
-    <p class="small muted" style="margin:12px 0 0">教材建议 11 月开始的话，2 月底前学完权利关系。按这个节奏，每周大约学 <b>${perWeek}</b> 个ポイント（共 ${total} 个，考试 14 题）。</p>
+    <h2>四科进度</h2>
+    ${BOOKS.map((b) => { const x = bookStat(b);
+      return `<div class="hrow book-row"><a class="hl" href="#/toc/${b.id}"><b>${esc(b.title)}</b></a><span class="small muted" style="width:64px">本试 ${b.examQ} 题</span>
+        ${x.total ? `<div class="hbar">${x.m ? `<i class="seg-m" style="flex:${x.m}"></i>` : ""}${x.l ? `<i class="seg-l" style="flex:${x.l}"></i>` : ""}${x.total - x.m - x.l ? `<i class="seg-n" style="flex:${x.total - x.m - x.l}"></i>` : ""}</div><span class="hv">${x.m}/${x.total}</span>`
+          : `<span class="small muted" style="flex:1">📦 教材内容待导入</span>`}</div>`; }).join("")}
+    <div class="legend" style="margin-top:8px"><span><i class="dot" style="background:var(--good)"></i>已掌握</span><span><i class="dot" style="background:var(--warn)"></i>学习中</span><span><i class="dot" style="background:var(--line)"></i>未学</span></div>
   </div>
   <div class="card">
     <h2>每一节怎么学</h2>
     <ol style="margin:0;padding-left:1.3em">
       <li><b>听原文</b>：先听作者朗读这一节（可以调速），跟着看日文原文。</li>
       <li><b>读中文讲义</b>：AI 根据原文生成的中文讲义，弄懂"为什么"。</li>
+      <li><b>做本节真题</b>：一問一答 ○× 和过去问，错的自动进错题本。</li>
       <li><b>问 AI</b>：哪里不懂直接问；然后让 AI 出题，或者你讲给 AI 听。</li>
       <li><b>标记状态</b>：真懂了就标「已掌握」，系统会在 1、3、7、14、30、60 天后安排复习。</li>
-      <li><b>记卡点</b>：暂时想不通的，记进卡点本，之后回来解决。</li>
     </ol>
   </div>`;
+  const setPlan = () => { const p = planOf(); p.by = $("#planBy").value || p.by; p.ox = Math.max(0, Number($("#planOx").value) || 0); p.t = Date.now(); save(); viewHome(); };
+  $("#planBy").onchange = setPlan; $("#planOx").onchange = setPlan;
 }
 
-// ---------------- 目录 ----------------
-function viewToc() {
-  const b = BOOKS[0];
-  $("#app").innerHTML = `<h1>${b.title}（${b.zh}）</h1>
-  <p class="muted small" style="margin-top:0">${b.volume} · ${b.courses.length} 个コース · ${POINTS.length} 个ポイント · 考试 ${b.examQ} 题</p>
+// ---------------- 目录（四科） ----------------
+function viewToc(bookId) {
+  const b = BOOK_BY_ID[bookId] || BOOKS[0];
+  const tabs = `<div class="book-tabs">${BOOKS.map((x) => { const st = bookStat(x);
+    return `<a class="book-tab ${x.id === b.id ? "on" : ""} ${st.total ? "" : "off"}" href="#/toc/${x.id}"><b>${esc(x.title)}</b>
+      <span class="small">${st.total ? `${st.m}/${st.total} 已掌握` : "待导入"} · ${x.examQ} 题</span></a>`; }).join("")}</div>`;
+  if (!b.courses.length) {
+    $("#app").innerHTML = `<h1>目录</h1>${tabs}<div class="card"><h2>${esc(b.title)}（${esc(b.zh)}）</h2>
+      <p style="margin:0">📦 这一科的教材内容（朗读、原文、讲义、闪卡）还没导入。</p>
+      <p class="small muted" style="margin:8px 0 0">本试 ${b.examQ} 题（${esc(b.qNo)}）${b.note ? ` · ${esc(b.note)}` : ""}。导入后会和権利関係一样，按コース › ポイント 排列。</p></div>`;
+    return;
+  }
+  const st = bookStat(b);
+  $("#app").innerHTML = `<h1>目录</h1>${tabs}
+  <p class="muted small">${esc(b.title)}（${esc(b.zh)}）${b.volume ? ` · ${b.volume}` : ""} · ${b.courses.length} 个コース · ${st.total} 个ポイント · 本试 ${b.examQ} 题（${esc(b.qNo)}）　<span class="freq hot">🔥</span> 高频　<span class="freq warm">⭐</span> 常考（近几场过去问的出题场数）</p>
   ${b.courses.map((c) => {
-    const pts = POINTS.filter((p) => p.course === c.n);
+    const pts = POINTS.filter((p) => p.book === b.id && p.course === c.n);
     const done = pts.filter((p) => statusOf(p.id) === "mastered").length;
     return `<div class="course">
-      <div class="course-h"><b>第${c.n}コース ${esc(c.title)}</b><span class="muted small">p.${c.p} · ${done}/${pts.length}</span>
-      ${c.ichimon ? `<span class="muted small">一問一答 ${c.ichimon} · 過去問 ${c.kakomon}</span>` : ""}</div>
+      <div class="course-h"><b>第${c.n}コース ${esc(c.title)}</b><span class="muted small">p.${c.p} · ${done}/${pts.length}</span></div>
       <div class="plist">${pts.map((pt) => {
         const imp = impOf(pt), r = S.points[pt.id]?.review;
-        return `<a class="pitem" href="#/p/${pt.id}"><i class="st ${statusOf(pt.id)}"></i>
+        return `<a class="pitem" href="#/p/${pt.id}" data-pid="${pt.id}"><i class="st ${statusOf(pt.id)}"></i>
           <span class="t">${"❶❷❸❹❺❻❼❽"[pt.n - 1]} ${esc(pt.title)}</span>
           ${r && r.due <= today() ? `<span class="due-tag">复习</span>` : ""}
           ${imp ? `<span class="imp ${imp}">${imp}</span>` : ""}</a>`;
       }).join("")}</div></div>`;
   }).join("")}`;
+  pointInfo().then(({ m, nExams }) => {
+    document.querySelectorAll(".pitem[data-pid]").forEach((a) => {
+      const h = heat(m.get(a.dataset.pid), nExams);
+      if (h && h.cls) a.querySelector(".t").insertAdjacentHTML("afterend", `<span class="freq ${h.cls}" title="${h.tip}">${h.label}</span>`);
+    });
+  }).catch(() => {});
 }
 
 // ---------------- 知识点页 ----------------
@@ -162,14 +207,14 @@ async function viewPoint(id, opts = {}) {
   const pt = POINT_BY_ID[id];
   if (!pt) return viewToc();
   const p = P(id);
-  if (p.status === "new") { p.status = "learning"; touchDay(); save(); }
+  if (p.status === "new") { p.status = "learning"; p.started = today(); touchDay(); save(); }
   const idx = POINTS.indexOf(pt);
   const prev = POINTS[idx - 1], next = POINTS[idx + 1];
   const isDue = p.review && p.review.due <= today();
   cur = { id, segments: [], streaming: false, gen: null };
 
   $("#app").innerHTML = `
-  <div class="crumbs"><a href="#/toc">${pt.bookTitle}</a> › 第${pt.course}コース ${esc(pt.courseTitle)} › 教材 ${pt.volume} p.${pt.page}</div>
+  <div class="crumbs"><a href="#/toc/${pt.book}">${pt.bookTitle}</a> › 第${pt.course}コース ${esc(pt.courseTitle)} › 教材 ${pt.volume} p.${pt.page}</div>
   <div class="phead">
     <div class="spacer"><h1>第${pt.n}ポイント　${esc(pt.title)}</h1></div>
     <div class="row">
@@ -667,8 +712,8 @@ function route() {
   window.scrollTo(0, 0);
   $("#app").onclick = null;
   if (!booted && r !== "sync") return viewSync();
-  if (r === "kk") return id === "run" ? viewRun() : id === "wrong" ? viewWrong() : viewKK();
-  if (r === "toc") return viewToc();
+  if (r === "kk") return id === "run" ? viewRun() : id === "wrong" ? viewWrong() : id === "mock" ? viewMock() : BOOK_BY_ID[id] ? viewBook(id) : viewKK();
+  if (r === "toc") return viewToc(id);
   if (r === "review") return viewReview();
   if (r === "stuck") return viewStuck();
   if (r === "sync") return viewSync();
@@ -822,8 +867,8 @@ function viewStats() {
   // 未来 14 天复习安排
   const due = Array.from({ length: 14 }, (_, i) => { const d = addDays(i); return { d, n: all.filter((x) => x.p.review && (i === 0 ? x.p.review.due <= d : x.p.review.due === d)).length }; });
   const dueMax = Math.max(1, ...due.map((x) => x.n));
-  const courses = BOOKS[0].courses.map((c) => {
-    const xs = all.filter((x) => x.pt.course === c.n);
+  const courses = BOOKS.flatMap((b) => b.courses.map((c) => ({ b, c }))).map(({ b, c }) => {
+    const xs = all.filter((x) => x.pt.book === b.id && x.pt.course === c.n);
     return { c, total: xs.length,
       m: xs.filter((x) => x.p.status === "mastered").length, l: xs.filter((x) => x.p.status === "learning").length,
       known: xs.reduce((n, x) => n + Object.values(x.p.cardStat || {}).filter((k) => k.known).length, 0),

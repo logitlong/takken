@@ -7,7 +7,7 @@ export const BOOKS = [
     title: "権利関係",
     zh: "权利关系",
     volume: "分冊①",
-    examQ: 14,
+    examQ: 14, qNo: "問1〜14",
     courses: [
       { n: 1, title: "意思表示", p: 1, ichimon: "001～015", kakomon: "問1～問5", points: [
         ["契約の成立", 2, "C"], ["詐欺・強迫", 4, "A"], ["虚偽表示", 10, "B"],
@@ -48,7 +48,13 @@ export const BOOKS = [
         ["委任", 220], ["使用貸借", 223] ] },
     ],
   },
+  // 以下の 3 科目は教材内容をまだ取り込んでいない（courses が空 = 「待导入」として表示）
+  { id: "gyoho", title: "宅建業法", zh: "宅建业法", volume: "", examQ: 20, qNo: "問26〜45", courses: [] },
+  { id: "hourei", title: "法令上の制限", zh: "法令上的限制", volume: "", examQ: 8, qNo: "問15〜22", courses: [] },
+  { id: "zei", title: "税・その他", zh: "税・其他", volume: "", examQ: 8, qNo: "問23〜25・46〜50", note: "登録講習修了者は問46〜50 免除", courses: [] },
 ];
+export const BOOK_BY_ID = Object.fromEntries(BOOKS.map((b) => [b.id, b]));
+export const EXAM_TOTAL = 50, PASS_HINT = "合格线近年 33〜38 分 / 50";
 
 // フラットなポイント一覧（学習順）
 export const POINTS = [];

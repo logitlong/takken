@@ -274,3 +274,35 @@ input.btn { cursor: text; font-size: 16px; }
 .kk-st.ok .mk { color: var(--good); } .kk-st.ng .mk { color: var(--bad); }
 .kk-st-b p { margin: 4px 0; }
 .pt-link { display: inline-block; margin-right: 8px; }
+
+/* 四科：目录标签 / 过去问科目卡片 */
+.book-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 10px 0 14px; }
+.book-tab { display: flex; flex-direction: column; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); }
+.book-tab .small { color: var(--muted); }
+.book-tab.on { border-color: var(--accent); background: var(--accent-soft); }
+.book-tab.on b { color: var(--accent); }
+.book-tab.off { opacity: .7; }
+.kk-books { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.kk-books .card { margin-bottom: 0; }
+a.kk-book { color: var(--ink); display: block; }
+a.kk-book:hover { border-color: var(--accent); }
+.kk-book.off { opacity: .65; border-style: dashed; }
+.kk-book-go { margin-top: 8px; color: var(--accent); font-size: 13px; font-weight: 600; }
+.book-row .hl { min-width: 7em; }
+/* 高频标记 */
+.freq { font-size: 11px; font-weight: 700; padding: 0 6px; border-radius: 6px; line-height: 18px; white-space: nowrap; background: var(--code); color: var(--muted); }
+.freq.hot { background: var(--bad-soft); color: var(--bad); }
+.freq.warm { background: var(--warn-soft); color: var(--warn); }
+/* 今日计划 */
+.plan { display: grid; gap: 2px; margin-top: 8px; }
+.plan-row { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+.plan-row:last-child { border-bottom: 0; }
+.plan-row.done > div { color: var(--muted); }
+.plan-ck { flex: none; }
+/* 模考 */
+.mock-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.mock-grid button { width: 34px; height: 30px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); font-size: 13px; }
+.mock-grid button.done { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.mock-grid button.cur { outline: 2px solid var(--accent); outline-offset: 1px; font-weight: 700; }
+.kk-choice.picked { border-color: var(--accent); background: var(--accent-soft); }
+.kk-timer.late { color: var(--bad); }
