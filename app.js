@@ -1,6 +1,7 @@
-import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=47e2629c20";
+import { BOOKS, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=98bec0596e";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=47e2629c20";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=98bec0596e";
+import { initKK, viewKK, viewRun, viewWrong, fillPointCard, wrongKeys, kkTotals, courseAccuracy } from "./quiz.js?v=98bec0596e";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -49,6 +50,8 @@ async function doSync() {
 }
 function touchDay() { S.days[today()] = (S.days[today()] || 0) + 1; }
 
+initKK({ S: () => S, save, touchDay: () => touchDay(), $: (s, el) => $(s, el), esc: (x) => esc(x), md: (x) => md(x), addDays: (n) => addDays(n), P: (id) => P(id) });
+
 const statusOf = (id) => S.points[id]?.status || "new";
 const impOf = (pt) => S.points[pt.id]?.imp || pt.imp;
 const dueList = () => POINTS.filter((pt) => { const r = S.points[pt.id]?.review; return r && r.due <= today(); });
@@ -75,7 +78,7 @@ function renderNav() {
   const r = location.hash.split("/")[1] || "";
   const due = dueList().length, stuck = openStuck().length;
   const item = (h, label, n) => `<a href="#/${h}" class="${r === h ? "on" : ""}">${label}${n ? `<span class="badge">${n}</span>` : ""}</a>`;
-  $("#nav").innerHTML = item("", "首页") + item("toc", "目录") + item("review", "今日复习", due) + item("stuck", "卡点本", stuck) + item("stats", "统计");
+  $("#nav").innerHTML = item("", "首页") + item("toc", "目录") + item("review", "今日复习", due) + item("kk", "过去问", wrongKeys().length) + item("stuck", "卡点本", stuck) + item("stats", "统计");
   const sy = { off: "", syncing: "sync-ing", ok: "sync-ok", error: "sync-err" }[sync.state];
   const sb = $("#syncBtn");
   sb.classList.toggle("on", r === "sync");
@@ -107,6 +110,11 @@ function viewHome() {
     <div class="row"><h2 style="margin:0">继续学习</h2><span class="spacer"></span><span class="muted small">已学习 ${studyDays} 天</span></div>
     ${next ? `<p style="margin:8px 0 12px">第${next.course}コース「${esc(next.courseTitle)}」 › <b>第${next.n}ポイント ${esc(next.title)}</b></p>
       <a class="btn primary" href="#/p/${next.id}">开始这一节 →</a>` : `<p>🎉 权利关系全部掌握了！</p>`}
+  </div>
+  <div class="card">
+    <div class="row"><h2 style="margin:0">📝 过去问</h2><span class="spacer"></span><span class="muted small">${(() => { const t = kkTotals(); return t.n ? `累计作答 ${t.n} 次 · 正确率 ${Math.round((t.ok / t.n) * 100)}%` : "还没做过"; })()}</span></div>
+    <p style="margin:8px 0 12px">官方真题 令和2〜7年 権利関係，逐肢中文解析。${wrongKeys().length ? `错题本里有 <b>${wrongKeys().length}</b> 个待重做。` : ""}</p>
+    <a class="btn primary" href="#/kk">去做题 →</a>
   </div>
   <div class="card">
     <h2>权利关系 进度</h2>
@@ -186,19 +194,18 @@ async function viewPoint(id, opts = {}) {
         </div>
       </div>
       <div class="card">
-        <div class="row"><h2 style="margin:0">📝 真题练习</h2><span class="spacer"></span>${dojoSummary(pt)}</div>
-        ${pt.dojo ? `<p class="small" style="margin:10px 0">本节对应「${pt.dojo.n}. ${esc(pt.dojo.name)}」分野。点按钮跳过去 → 点书签栏的 <b>📌 宅建</b> 直接开始；<b>做完一批不想做了，再点一次 📌 宅建</b>，一問一答的对错就自动记回来（过去问记不回来，用下面的 ✅ / ❌ 手动记）。</p>` : ""}
-        ${bmInstalled() ? "" : `<p class="small" style="margin:0 0 10px">还没装 📌 宅建 书签？去 <a href="#/sync">☁️ 同步</a> 页面装一下。</p>`}
-        <div class="row">
-          <button class="btn primary" data-dojo="marubatu">一問一答（○×）↗</button>
-          <button class="btn primary" data-dojo="kakomon">过去问（四选一）↗</button>
-          ${ENV.ai ? `<button class="btn" id="wrongQ">做错了？让 AI 讲</button>` : ""}
-        </div>
-        <div class="row small muted" style="margin-top:10px">
-          <span>过去问的成绩读不到，做完可以手动记：</span>
-          <button class="btn sm" data-tally="ok">✅ 对 <b>${p.quiz?.ok || 0}</b></button>
-          <button class="btn sm" data-tally="ng">❌ 错 <b>${p.quiz?.ng || 0}</b></button>
-        </div>
+        <div class="row"><h2 style="margin:0">📝 本节真题</h2><span class="spacer"></span>${ENV.ai ? `<button class="btn sm" id="wrongQ">做错了？让 AI 讲</button>` : ""}</div>
+        <div id="kkBox"><div class="empty">加载题库…</div></div>
+        <details style="margin-top:10px"><summary class="small muted">外部网站（宅建試験ドットコム）</summary>
+          ${pt.dojo ? `<p class="small" style="margin:8px 0">本节对应「${pt.dojo.n}. ${esc(pt.dojo.name)}」分野。跳过去后点书签栏的 <b>📌 宅建</b> 直接开始；做完再点一次，一問一答的对错会自动记回来。${dojoSummary(pt)}</p>` : ""}
+          <div class="row">
+            <button class="btn sm" data-dojo="marubatu">一問一答（○×）↗</button>
+            <button class="btn sm" data-dojo="kakomon">过去问（四选一）↗</button>
+            <span class="small muted">手动记：</span>
+            <button class="btn sm" data-tally="ok">✅ 对 <b>${p.quiz?.ok || 0}</b></button>
+            <button class="btn sm" data-tally="ng">❌ 错 <b>${p.quiz?.ng || 0}</b></button>
+          </div>
+        </details>
       </div>
       <div class="pager">
         ${prev ? `<a class="btn" href="#/p/${prev.id}">← ${esc(prev.title)}</a>` : "<span></span>"}
@@ -244,6 +251,7 @@ async function viewPoint(id, opts = {}) {
     $("#input").value = "我做错了一道真题：\n【题目】\n\n【我的答案】\n【正确答案】\n请告诉我错在哪里、对应这一节的哪条规则，以及下次怎么避免。";
     $("#input").rows = 7; $("#input").focus();
   };
+  fillPointCard(id, $("#kkBox"));
   $("#notes").oninput =(e) => { P(id).notes = e.target.value; save(); };
   $("#clearChat").onclick = () => { if (confirm("清空这一节的对话？")) { P(id).chat = []; save(); renderMsgs(); } };
   if (ENV.ai) {
@@ -657,7 +665,9 @@ function route() {
   const [, r, id, mode] = location.hash.split("/");
   renderNav();
   window.scrollTo(0, 0);
+  $("#app").onclick = null;
   if (!booted && r !== "sync") return viewSync();
+  if (r === "kk") return id === "run" ? viewRun() : id === "wrong" ? viewWrong() : viewKK();
   if (r === "toc") return viewToc();
   if (r === "review") return viewReview();
   if (r === "stuck") return viewStuck();
@@ -731,7 +741,7 @@ function viewSync() {
   if ($("#resetAll")) $("#resetAll").onclick = async () => {
     if (!confirm("确定清除全部学习记录，从头开始？")) return;
     if (prompt("这一步不能撤销。请输入「清除」确认：") !== "清除") return;
-    S = { points: {}, stuck: [], days: {}, stuckDel: [], bmOk: S.bmOk, bm2: S.bm2, dojoLog: [], resetAt: Date.now() };
+    S = { points: {}, stuck: [], days: {}, stuckDel: [], bmOk: S.bmOk, bm2: S.bm2, dojoLog: [], kkLog: [], resetAt: Date.now() };
     stampBaseline(S);
     writeLocalState(S);
     if (ghCfg()) await doSync();
@@ -789,7 +799,8 @@ function viewStats() {
   const known = sum((p) => Object.values(p.cardStat || {}).filter((c) => c.known).length);
   const tries = sum((p) => Object.values(p.cardStat || {}).reduce((n, c) => n + (c.ok || 0) + (c.ng || 0), 0));
   const ds = dojoStats();
-  const qOk = sum((p) => p.quiz?.ok || 0) + ds.ok, qNg = sum((p) => p.quiz?.ng || 0) + ds.ng;
+  const kt = kkTotals();
+  const qOk = sum((p) => p.quiz?.ok || 0) + ds.ok + kt.ok, qNg = sum((p) => p.quiz?.ng || 0) + ds.ng + (kt.n - kt.ok);
   // 真题按宅建試験ドットコム的分野统计：一問一答（书签导入）+ 过去问（手动记）
   const fields = Object.entries(DOJO_FIELDS).map(([n, name]) => {
     n = Number(n);
@@ -856,7 +867,15 @@ function viewStats() {
         <span class="hv">${x.ok + x.ng ? `${x.ok}/${x.ok + x.ng}` : "—"}</span></div>`).join("")}
     </div>
   </div>
+  <div class="card"><h2>过去问正确率（按コース）</h2><p class="small muted" style="margin-top:-6px">站内过去问（四选一 + ○×）的累计作答。</p><div id="kkAcc"><div class="empty">加载…</div></div></div>
   <div class="card"><h2>接下来 14 天要复习</h2><p class="small muted" style="margin-top:-6px">第一根包括今天和已经过期的。</p>${colChart(due, dueMax, "要复习")}</div>`;
+  courseAccuracy().then((rows) => {
+    const box = $("#kkAcc"); if (!box) return;
+    box.innerHTML = rows.map((x) => { const r = x.n ? x.ok / x.n : 0;
+      return `<div class="hrow" title="${esc(x.c.title)}：${x.ok}/${x.n}"><span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
+        <div class="hbar single">${x.n ? `<i class="${r >= 0.7 ? "ok" : "ng"}" style="width:${r * 100}%"></i>` : ""}</div>
+        <span class="hv">${x.n ? `${Math.round(r * 100)}%` : "—"}</span></div>`; }).join("");
+  }).catch(() => { const box = $("#kkAcc"); if (box) box.textContent = "题库读取失败"; });
 }
 
 // ---------------- 主题 ----------------
@@ -885,7 +904,7 @@ async function boot2() {
   stampBaseline(S);
   if (ghCfg()) await doSync();
   route();
-  if (!location.hash.startsWith("#/import")) maybeAskBookmark();
+  // 有了站内过去问，外部网站的书签不再主动弹窗（☁️ 同步页里还能装）
 }
 (async () => {
   await detectEnv();

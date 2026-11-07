@@ -108,6 +108,13 @@ export async function loadGen(id) {
   return { explain: explain || "", cards: cards ? JSON.parse(cards) : [] };
 }
 
+// 过去问题库（tools/kakomon.mjs 生成）
+export async function loadKakomon() {
+  if (ENV.local) return fetch("/api/kakomon").then((r) => (r.ok ? r.json() : null));
+  const t = await repoFile("data/kakomon/kenri.json", "text");
+  return t ? JSON.parse(t) : null;
+}
+
 // ---------- 学习记录 ----------
 export async function loadLocalState() {
   let s = null;
@@ -117,7 +124,7 @@ export async function loadLocalState() {
 }
 function norm(s) {
   s ||= {};
-  s.points ||= {}; s.stuck ||= []; s.days ||= {}; s.stuckDel ||= []; s.dojoLog ||= [];
+  s.points ||= {}; s.stuck ||= []; s.days ||= {}; s.stuckDel ||= []; s.dojoLog ||= []; s.kkLog ||= [];
   return s;
 }
 export function writeLocalState(S) {
@@ -142,7 +149,7 @@ export function stamp(S) {
 function afterReset(x, R) {
   if ((x.resetAt || 0) >= R) return x;
   const keep = (o) => (o.t || 0) > R;
-  return { ...x, resetAt: R, days: {}, stuckDel: x.stuckDel, dojoLog: x.dojoLog.filter((e) => e[3] * 1000 > R),
+  return { ...x, resetAt: R, days: {}, stuckDel: x.stuckDel, dojoLog: x.dojoLog.filter((e) => e[3] * 1000 > R), kkLog: x.kkLog.filter((e) => e[2] * 1000 > R),
     points: Object.fromEntries(Object.entries(x.points).filter(([, p]) => keep(p))), stuck: x.stuck.filter(keep) };
 }
 export function merge(a, b) {
@@ -153,6 +160,9 @@ export function merge(a, b) {
   // 一問一答成绩：两边合在一起，按 题号+时间 去重
   const seen = new Set();
   out.dojoLog = [...a.dojoLog, ...b.dojoLog].filter((e) => { const k = `${e[0]}@${e[3]}`; return !seen.has(k) && seen.add(k); }).sort((x, y) => x[3] - y[3]);
+  // 站内过去问作答：同样合并去重（key+时间+对错）
+  const seen2 = new Set();
+  out.kkLog = [...a.kkLog, ...b.kkLog].filter((e) => { const k = `${e[0]}@${e[2]}@${e[1]}`; return !seen2.has(k) && seen2.add(k); }).sort((x, y) => x[2] - y[2]);
   for (const id of new Set([...Object.keys(a.points), ...Object.keys(b.points)])) {
     const x = a.points[id], y = b.points[id];
     out.points[id] = !x ? y : !y ? x : (y.t || 0) > (x.t || 0) ? y : x;
