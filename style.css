@@ -306,3 +306,7 @@ a.kk-book:hover { border-color: var(--accent); }
 .mock-grid button.cur { outline: 2px solid var(--accent); outline-offset: 1px; font-weight: 700; }
 .kk-choice.picked { border-color: var(--accent); background: var(--accent-soft); }
 .kk-timer.late { color: var(--bad); }
+/* 手动记：计数 + 减一 */
+.tally { display: inline-flex; }
+.tally .btn:first-child { border-radius: 8px 0 0 8px; }
+.tally .btn + .btn { border-radius: 0 8px 8px 0; border-left: 0; padding: 3px 10px; color: var(--muted); }

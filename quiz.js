@@ -1,7 +1,7 @@
 // 过去问（站内题库）：四科总览 / 科目页 / 四选一 / 一問一答（○×）/ 模考 / 错题本 / 弱点 / 高频
 // 题库来自 RETIO 官方过去问，tools/kakomon.mjs 生成，每科一个文件 data/kakomon/<科目id>.json（没有的科目显示「待导入」）。
-import { BOOKS, BOOK_BY_ID, POINT_BY_ID, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=54dc5fc89f";
-import { loadKakomon } from "./store.js?v=54dc5fc89f";
+import { BOOKS, BOOK_BY_ID, POINT_BY_ID, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=885003b175";
+import { loadKakomon } from "./store.js?v=885003b175";
 
 let C; // 由 app.js 注入：{ S, save, touchDay, $, esc, md, addDays, today }
 export function initKK(ctx) { C = ctx; }

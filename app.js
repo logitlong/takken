@@ -1,7 +1,7 @@
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=54dc5fc89f";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=885003b175";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=54dc5fc89f";
-import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=54dc5fc89f";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=885003b175";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=885003b175";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -247,8 +247,8 @@ async function viewPoint(id, opts = {}) {
             <button class="btn sm" data-dojo="marubatu">一問一答（○×）↗</button>
             <button class="btn sm" data-dojo="kakomon">过去问（四选一）↗</button>
             <span class="small muted">手动记：</span>
-            <button class="btn sm" data-tally="ok">✅ 对 <b>${p.quiz?.ok || 0}</b></button>
-            <button class="btn sm" data-tally="ng">❌ 错 <b>${p.quiz?.ng || 0}</b></button>
+            <span class="tally"><button class="btn sm" data-tally="ok" title="记一次对">✅ 对 <b>${p.quiz?.ok || 0}</b></button><button class="btn sm" data-dec="ok" title="点错了，减一">−</button></span>
+            <span class="tally"><button class="btn sm" data-tally="ng" title="记一次错">❌ 错 <b>${p.quiz?.ng || 0}</b></button><button class="btn sm" data-dec="ng" title="点错了，减一">−</button></span>
           </div>
         </details>
       </div>
@@ -286,11 +286,16 @@ async function viewPoint(id, opts = {}) {
     document.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("on", x === b));
     ["audio", "explain", "cards", "notes"].forEach((t) => $("#tab-" + t).hidden = t !== b.dataset.tab);
   });
-  document.querySelectorAll("[data-tally]").forEach((b) => b.onclick = () => {
+  // 手动记：点按钮 +1，点旁边的「−」减一（点错了可以改回来，不会减到 0 以下）
+  const tally = (k, d) => {
     const q = (P(id).quiz ||= { ok: 0, ng: 0 });
-    q[b.dataset.tally]++; touchDay(); save();
-    b.querySelector("b").textContent = q[b.dataset.tally];
-  });
+    q[k] = Math.max(0, (q[k] || 0) + d);
+    if (d > 0) touchDay();
+    save();
+    document.querySelector(`[data-tally="${k}"] b`).textContent = q[k];
+  };
+  document.querySelectorAll("[data-tally]").forEach((b) => b.onclick = () => tally(b.dataset.tally, 1));
+  document.querySelectorAll("[data-dec]").forEach((b) => b.onclick = () => tally(b.dataset.dec, -1));
   document.querySelectorAll("[data-dojo]").forEach((b) => b.onclick = () => openDojo(b.dataset.dojo, pt.dojo?.n));
   if ($("#wrongQ")) $("#wrongQ").onclick = () => {
     $("#input").value = "我做错了一道真题：\n【题目】\n\n【我的答案】\n【正确答案】\n请告诉我错在哪里、对应这一节的哪条规则，以及下次怎么避免。";
