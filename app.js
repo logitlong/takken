@@ -1,7 +1,7 @@
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=885003b175";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=e3b74a57d1";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=885003b175";
-import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=885003b175";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=e3b74a57d1";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=e3b74a57d1";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -590,9 +590,11 @@ function renderMsgs() {
       ${m.role === "assistant" ? `<div class="acts"><button data-stuck="${i}">📌 记为卡点</button></div>` : ""}</div>`).join("")
     : `<div class="empty small">还没有对话。<br>不懂的地方直接问，或者点上面的按钮。</div>`;
   $("#msgs").querySelectorAll("[data-stuck]").forEach((b) => b.onclick = () => {
-    const q = chat[b.dataset.stuck - 1]?.content || "";
+    const i = Number(b.dataset.stuck);
+    const q = chat[i - 1]?.role === "user" ? chat[i - 1].content : "";
     const text = prompt("记下这个卡点（简单写哪里没懂）：", q.slice(0, 80));
-    if (text) { S.stuck.unshift({ id: Date.now(), pointId: cur.id, text, created: today(), done: false }); save(); }
+    // 连同当初的提问和 AI 的回答一起存进卡点本
+    if (text) { S.stuck.unshift({ id: Date.now(), pointId: cur.id, text, q, a: chat[i].content, created: today(), done: false }); save(); }
   });
   $("#msgs").scrollTop = 1e9;
 }
@@ -685,6 +687,15 @@ function viewReview() {
 }
 
 // ---------------- 卡点本 ----------------
+// 卡点带着当初的问答（q/a）；以前记的卡点没存回答，就到那一节的对话里按提问文字找回来
+function stuckQA(s) {
+  if (s.a) return { q: s.q || "", a: s.a };
+  const chat = S.points[s.pointId]?.chat || [];
+  const key = (s.text || "").trim();
+  if (!key) return null;
+  const i = chat.findIndex((m, j) => m.role === "user" && chat[j + 1]?.role === "assistant" && (m.content.startsWith(key) || m.content.includes(key)));
+  return i >= 0 ? { q: chat[i].content, a: chat[i + 1].content } : null;
+}
 function viewStuck() {
   const list = S.stuck;
   $("#app").innerHTML = `<h1>卡点本</h1>
@@ -695,10 +706,13 @@ function viewStuck() {
       <input id="newTxt" class="btn" style="flex:1;min-width:200px" placeholder="哪里没懂？">
       <button class="btn primary" id="addStuck">添加</button>
     </div>
-    ${list.length ? list.map((s) => { const pt = POINT_BY_ID[s.pointId]; return `
+    ${list.length ? list.map((s) => { const pt = POINT_BY_ID[s.pointId], qa = stuckQA(s); return `
       <div class="stuck-item ${s.done ? "done" : ""}">
         <input type="checkbox" data-done="${s.id}" ${s.done ? "checked" : ""} title="已解决">
-        <div style="flex:1"><div class="txt">${esc(s.text)}</div><div class="small muted">${s.created} · <a href="#/p/${s.pointId}">${esc(pt?.courseTitle)} › ${esc(pt?.title)}</a></div></div>
+        <div style="flex:1;min-width:0"><div class="txt">${esc(s.text)}</div><div class="small muted">${s.created} · <a href="#/p/${s.pointId}">${esc(pt?.courseTitle)} › ${esc(pt?.title)}</a></div>
+          ${qa ? `<details class="stuck-qa"><summary class="small">💬 当初的问答</summary>
+            ${qa.q ? `<div class="stuck-q"><b>我问：</b>${esc(qa.q).replace(/\n/g, "<br>")}</div>` : ""}
+            <div class="stuck-a md">${md(qa.a)}</div></details>` : ""}</div>
         <button class="btn sm" data-ask="${s.id}">去问 AI</button><button class="btn sm" data-del="${s.id}">删除</button>
       </div>`; }).join("") : `<div class="empty">还没有卡点。</div>`}
   </div>`;

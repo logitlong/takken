@@ -310,3 +310,8 @@ a.kk-book:hover { border-color: var(--accent); }
 .tally { display: inline-flex; }
 .tally .btn:first-child { border-radius: 8px 0 0 8px; }
 .tally .btn + .btn { border-radius: 0 8px 8px 0; border-left: 0; padding: 3px 10px; color: var(--muted); }
+/* 卡点本：当初的问答 */
+.stuck-qa { margin-top: 6px; }
+.stuck-qa summary { cursor: pointer; color: var(--accent); }
+.stuck-q { margin: 8px 0 6px; padding: 8px 10px; background: var(--code); border-radius: 8px; font-size: 14px; }
+.stuck-a { padding: 4px 10px; border-left: 3px solid var(--accent-soft); font-size: 14px; overflow-x: auto; }
