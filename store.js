@@ -115,6 +115,13 @@ export async function loadKakomon(book) {
   return t ? JSON.parse(t) : null;
 }
 
+// 法条、速记表、法改正等附加数据（data/ 下的 JSON；本地走服务器，远程走仓库）
+export async function loadData(rel) {
+  if (ENV.local) return fetch(`/api/data/${rel}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  const t = await repoFile(`data/${rel}`, "text").catch(() => null);
+  return t ? JSON.parse(t) : null;
+}
+
 // ---------- 学习记录 ----------
 export async function loadLocalState() {
   let s = null;
@@ -124,7 +131,7 @@ export async function loadLocalState() {
 }
 function norm(s) {
   s ||= {};
-  s.points ||= {}; s.stuck ||= []; s.days ||= {}; s.stuckDel ||= []; s.dojoLog ||= []; s.kkLog ||= []; s.mocks ||= [];
+  s.points ||= {}; s.stuck ||= []; s.days ||= {}; s.stuckDel ||= []; s.dojoLog ||= []; s.kkLog ||= []; s.mocks ||= []; s.cardLog ||= [];
   return s;
 }
 export function writeLocalState(S) {
@@ -149,7 +156,7 @@ export function stamp(S) {
 function afterReset(x, R) {
   if ((x.resetAt || 0) >= R) return x;
   const keep = (o) => (o.t || 0) > R;
-  return { ...x, resetAt: R, days: {}, stuckDel: x.stuckDel, dojoLog: x.dojoLog.filter((e) => e[3] * 1000 > R), kkLog: x.kkLog.filter((e) => e[2] * 1000 > R), mocks: x.mocks.filter((e) => e.t * 1000 > R),
+  return { ...x, resetAt: R, days: {}, stuckDel: x.stuckDel, dojoLog: x.dojoLog.filter((e) => e[3] * 1000 > R), kkLog: x.kkLog.filter((e) => e[2] * 1000 > R), mocks: x.mocks.filter((e) => e.t * 1000 > R), cardLog: x.cardLog.filter((e) => e[3] * 1000 > R),
     points: Object.fromEntries(Object.entries(x.points).filter(([, p]) => keep(p))), stuck: x.stuck.filter(keep) };
 }
 export function merge(a, b) {
@@ -165,6 +172,9 @@ export function merge(a, b) {
   out.kkLog = [...a.kkLog, ...b.kkLog].filter((e) => { const k = `${e[0]}@${e[2]}@${e[1]}`; return !seen2.has(k) && seen2.add(k); }).sort((x, y) => x[2] - y[2]);
   const seen3 = new Set();
   out.mocks = [...a.mocks, ...b.mocks].filter((e) => !seen3.has(e.t + e.title) && seen3.add(e.t + e.title)).sort((x, y) => x.t - y.t);
+  // 闪卡自评记录（趋势图用）：[ポイントid, 卡片序号, 对1/错0, 时间秒]
+  const seen4 = new Set();
+  out.cardLog = [...a.cardLog, ...b.cardLog].filter((e) => { const k = e.join("@"); return !seen4.has(k) && seen4.add(k); }).sort((x, y) => x[3] - y[3]);
   out.plan = (b.plan?.t || 0) > (a.plan?.t || 0) ? b.plan : a.plan;
   for (const id of new Set([...Object.keys(a.points), ...Object.keys(b.points)])) {
     const x = a.points[id], y = b.points[id];

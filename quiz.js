@@ -1,9 +1,9 @@
 // 过去问（站内题库）：四科总览 / 科目页 / 四选一 / 一問一答（○×）/ 模考 / 错题本 / 弱点 / 高频
 // 题库来自 RETIO 官方过去问，tools/kakomon.mjs 生成，每科一个文件 data/kakomon/<科目id>.json（没有的科目显示「待导入」）。
-import { BOOKS, BOOK_BY_ID, POINT_BY_ID, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=67aa790b02";
-import { loadKakomon } from "./store.js?v=67aa790b02";
+import { BOOKS, BOOK_BY_ID, POINT_BY_ID, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=0d93e61a7b";
+import { loadKakomon } from "./store.js?v=0d93e61a7b";
 
-let C; // 由 app.js 注入：{ S, save, touchDay, $, esc, md, addDays, today }
+let C; // 由 app.js 注入：{ S, save, touchDay, $, esc, md, addDays, today, lawHtml, linkLaws, ai, askAI }
 export function initKK(ctx) { C = ctx; }
 
 // ---------- 数据 ----------
@@ -33,12 +33,26 @@ const log = () => (C.S().kkLog ||= []);
 const mocks = () => (C.S().mocks ||= []);
 function tally() {
   const m = new Map();
-  for (const [k, ok] of log()) { const a = m.get(k) || { n: 0, ok: 0, seq: [] }; a.n++; a.ok += ok; a.seq.push(ok); m.set(k, a); }
+  for (const [k, ok, t] of log()) { const a = m.get(k) || { n: 0, ok: 0, seq: [], ts: [] }; a.n++; a.ok += ok; a.seq.push(ok); a.ts.push(t); m.set(k, a); }
   return m;
 }
-// 错过、而且之后还没连续答对 2 次 → 在错题本里
-const inWrong = (a) => { const z = a.seq.lastIndexOf(0); return z >= 0 && a.seq.length - 1 - z < 2; };
-export function wrongKeys() { return [...tally()].filter(([, a]) => inWrong(a)).map(([k]) => k); }
+// 错题按间隔重复：做错 → 第 1 天再做；到期那天答对 → 3 天后 → 7 天后 → 再对就「毕业」移出错题本。
+// 没到期就做也可以，但答对不算进度；任何时候答错都从头开始。
+const WRONG_INT = [1, 3, 7];
+const dayOfSec = (t) => new Date(t * 1000).toLocaleDateString("sv-SE");
+const plusDays = (d, n) => { const x = new Date(d + "T00:00:00"); x.setDate(x.getDate() + n); return x.toLocaleDateString("sv-SE"); };
+function wrongState(a) {
+  let st = null;
+  a.seq.forEach((ok, i) => {
+    const d = dayOfSec(a.ts[i]);
+    if (!ok) st = { step: 0, due: plusDays(d, WRONG_INT[0]), miss: (st?.miss || 0) + 1 };
+    else if (st && !st.grad && d >= st.due) { st.step++; if (st.step >= WRONG_INT.length) st.grad = true; else st.due = plusDays(d, WRONG_INT[st.step]); }
+  });
+  return st && !st.grad ? st : null;
+}
+export function wrongMap(T = tally()) { const m = new Map(); for (const [k, a] of T) { const st = wrongState(a); if (st) m.set(k, st); } return m; }
+export function wrongKeys() { return [...wrongMap().keys()]; }
+export function dueWrongKeys() { const t = C.today(); return [...wrongMap()].filter(([, st]) => st.due <= t).map(([k]) => k); }
 export function kkTotals() { let ok = 0, n = 0; for (const e of log()) { n++; ok += e[1]; } return { ok, n }; }
 // 今天做了多少（给学习计划用）
 export function kkToday() {
@@ -76,9 +90,9 @@ export async function pointInfo() {
 export function heat(x, nExams) {
   if (!x || !nExams) return null;
   const r = x.nEx / nExams;
-  return r >= 0.75 ? { cls: "hot", label: `🔥 ${x.nEx}/${nExams}`, tip: `近 ${nExams} 场考试里考了 ${x.nEx} 场（高频）` }
-    : r >= 0.5 ? { cls: "warm", label: `⭐ ${x.nEx}/${nExams}`, tip: `近 ${nExams} 场考试里考了 ${x.nEx} 场（常考）` }
-    : { cls: "", label: `${x.nEx}/${nExams}`, tip: `近 ${nExams} 场考试里考了 ${x.nEx} 场` };
+  return r >= 0.75 ? { cls: "hot", label: `${x.nEx}/${nExams}场`, tip: `近 ${nExams} 场考试里有 ${x.nEx} 场考到（高频）` }
+    : r >= 0.5 ? { cls: "warm", label: `${x.nEx}/${nExams}场`, tip: `近 ${nExams} 场考试里有 ${x.nEx} 场考到（常考）` }
+    : { cls: "", label: `${x.nEx}/${nExams}场`, tip: `近 ${nExams} 场考试里有 ${x.nEx} 场考到` };
 }
 const WEAK = (x) => x.n >= 3 && x.ok / x.n < 0.7; // 至少答 3 次、正确率 < 70%
 
@@ -94,37 +108,37 @@ function start(kind, keys, title, extra = {}) {
 // ---------- 过去问 总览（四科） ----------
 export async function viewKK() {
   const { $, esc } = C;
-  $("#app").innerHTML = `<h1>📝 过去问</h1><div class="empty">加载题库…</div>`;
+  $("#app").innerHTML = `<h1>过去问</h1><div class="empty">加载题库…</div>`;
   let D;
-  try { D = await kkDB(); } catch (e) { $("#app").innerHTML = `<h1>📝 过去问</h1><div class="card">题库读取失败：${esc(e.message)}</div>`; return; }
+  try { D = await kkDB(); } catch (e) { $("#app").innerHTML = `<h1>过去问</h1><div class="card">题库读取失败：${esc(e.message)}</div>`; return; }
   const T = tally(), wrong = wrongKeys();
   const all = statFor([...D.qs.map((q) => q.id), ...D.stmts.map((x) => x.key)], T);
   const ready = BOOKS.filter((b) => D.byBook[b.id].qs.length);
   const full = ready.length === BOOKS.length;
   const { m, nExams } = await pointInfo();
   const weak = [...m.values()].filter(WEAK).sort((a, b) => a.ok / a.n - b.ok / b.n).slice(0, 6);
-  $("#app").innerHTML = `<h1>📝 过去问</h1>
+  $("#app").innerHTML = `<h1>过去问</h1>
   <p class="muted small" style="margin-top:0">官方真题（RETIO）。本试共 ${EXAM_TOTAL} 题、2 小时；${PASS_HINT}。目前已导入 ${ready.map((b) => b.title).join("、") || "—"}，其他科目陆续补充。</p>
   <div class="stats">
     <div class="stat"><div class="v">${D.qs.length}<span class="muted small"> 题</span></div><div class="k">已导入（${D.stmts.length} 个 ○× 肢）</div></div>
     <div class="stat"><div class="v">${all.n}</div><div class="k">累计作答</div></div>
     <div class="stat"><div class="v">${pct(all.ok, all.n)}</div><div class="k">正确率</div></div>
-    <div class="stat"><div class="v">${wrong.length}</div><div class="k">错题本待重做</div></div>
+    <div class="stat"><div class="v">${dueWrongKeys().length}<span class="muted small"> / ${wrong.length}</span></div><div class="k">今天到期的错题 / 错题本</div></div>
   </div>
   <div class="kk-books">${BOOKS.map((b) => {
     const { qs, st } = D.byBook[b.id];
     const s = statFor([...qs.map((q) => q.id), ...st.map((x) => x.key)], T);
     return qs.length
-      ? `<a class="card kk-book" href="#/kk/${b.id}"><div class="row"><b>${esc(b.title)}</b><span class="muted small">${esc(b.zh)}</span><span class="spacer"></span><span class="muted small">本试 ${b.examQ} 题</span></div>
+      ? `<a class="card kk-book bk-${b.id}" href="#/kk/${b.id}"><div class="row"><b>${esc(b.title)}</b><span class="muted small">${esc(b.zh)}</span><span class="spacer"></span><span class="muted small">本试 ${b.examQ} 题</span></div>
           <div class="small" style="margin:6px 0">题库 <b>${qs.length}</b> 题 · ○× <b>${st.length}</b> 肢</div>
           <div class="small muted">${s.n ? `作答 ${s.n} 次 · 正确率 <b>${pct(s.ok, s.n)}</b>` : "还没做过"}</div>
           <div class="kk-book-go">进入 →</div></a>`
-      : `<div class="card kk-book off"><div class="row"><b>${esc(b.title)}</b><span class="muted small">${esc(b.zh)}</span><span class="spacer"></span><span class="muted small">本试 ${b.examQ} 题</span></div>
+      : `<div class="card kk-book off bk-${b.id}"><div class="row"><b>${esc(b.title)}</b><span class="muted small">${esc(b.zh)}</span><span class="spacer"></span><span class="muted small">本试 ${b.examQ} 题</span></div>
           <div class="small muted" style="margin:6px 0">${esc(b.qNo)}${b.note ? ` · ${esc(b.note)}` : ""}</div>
-          <div class="small muted">📦 题库待导入</div></div>`;
+          <div class="small muted">题库待导入</div></div>`;
   }).join("")}</div>
   <div class="card">
-    <div class="row"><h2 style="margin:0">⏱ 模考</h2><span class="spacer"></span><a class="small" href="#/kk/wrong">❌ 错题本（${wrong.length}）</a></div>
+    <div class="row"><h2 style="margin:0">模考</h2><span class="spacer"></span><a class="small" href="#/kk/wrong">错题本（今天到期 ${dueWrongKeys().length}）</a></div>
     <p class="small muted" style="margin:8px 0">交卷前不显示对错，时间按本试节奏（2 小时 / 50 题，每题约 2 分 24 秒）。</p>
     <div class="row">
       <button class="btn primary" data-mockall ${full ? "" : "disabled"} title="${full ? "" : "四科题库都导入后才能做"}">全科模考 50 题 · 120 分钟</button>
@@ -133,7 +147,7 @@ export async function viewKK() {
     ${full ? "" : `<p class="small muted" style="margin:8px 0 0">全科模考要等四科题库都导入后开放；现在可以先做单科模考。</p>`}
     ${mockHistory()}
   </div>
-  <div class="card"><h2>🎯 薄弱ポイント</h2>${weak.length ? weakRows(weak, nExams) : `<p class="small muted" style="margin:0">做题后，正确率低于 70% 的ポイント会出现在这里（每个至少答 3 次才算）。</p>`}</div>`;
+  <div class="card"><h2>薄弱ポイント</h2>${weak.length ? weakRows(weak, nExams) : `<p class="small muted" style="margin:0">做题后，正确率低于 70% 的ポイント会出现在这里（每个至少答 3 次才算）。</p>`}</div>`;
   $("#app").onclick = (e) => {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.mockall !== undefined) startMock(BOOKS.flatMap((x) => pickMock(D, x.id, x.examQ)), "全科模考");
@@ -175,11 +189,11 @@ export async function viewBook(bookId) {
   const D = await kkDB();
   const { qs, st } = D.byBook[bookId];
   const crumbs = `<div class="crumbs"><a href="#/kk">过去问</a> › ${esc(b.title)}</div>`;
-  if (!qs.length) { $("#app").innerHTML = `${crumbs}<h1>${esc(b.title)}</h1><div class="card">📦 这一科的题库还没导入（本试 ${b.examQ} 题，${esc(b.qNo)}）。</div>`; return; }
+  if (!qs.length) { $("#app").innerHTML = `${crumbs}<h1>${esc(b.title)}</h1><div class="card">这一科的题库还没导入（本试 ${b.examQ} 题，${esc(b.qNo)}）。</div>`; return; }
   const T = tally();
   const { m, nExams } = await pointInfo();
   const sQ = statFor(qs.map((q) => q.id), T), sO = statFor(st.map((x) => x.key), T);
-  const wrong = wrongKeys().filter((k) => (isQ(k) ? D.byId[k] : D.stById[k]?.q)?.book === bookId);
+  const wrong = dueWrongKeys().filter((k) => (isQ(k) ? D.byId[k] : D.stById[k]?.q)?.book === bookId);
   const exams = [...new Set(qs.map((q) => q.exam))];
   const courses = b.courses.map((c) => {
     const k = `${bookId}:${c.n}`;
@@ -203,19 +217,19 @@ export async function viewBook(bookId) {
       <button class="btn primary" data-go="rq">随机 10 题（四选一）</button>
       <button class="btn primary" data-go="ro">随机 20 肢（○×）</button>
       <button class="btn" data-go="nq">没做过的 10 题</button>
-      <button class="btn" data-go="hot" ${hot.length ? "" : "disabled"}>🔥 高频ポイント ○×</button>
-      <button class="btn" data-go="wrong" ${wrong.length ? "" : "disabled"}>❌ 本科错题（${wrong.length}）</button>
-      <button class="btn" data-go="mock">⏱ 模考 ${b.examQ} 题</button>
+      <button class="btn" data-go="hot" ${hot.length ? "" : "disabled"}>高频ポイント ○×</button>
+      <button class="btn" data-go="wrong" ${wrong.length ? "" : "disabled"}>本科到期错题（${wrong.length}）</button>
+      <button class="btn" data-go="mock">模考 ${b.examQ} 题</button>
     </div>
-    <p class="small muted" style="margin:10px 0 0">做错的题进错题本，之后连续答对 2 次才移出；相关ポイント如果已标「已掌握」，会被排到明天回炉复习。</p>
+    <p class="small muted" style="margin:10px 0 0">做错的题进错题本，按 1 → 3 → 7 天间隔再出现，到期那天答对三次才移出；相关ポイント如果已标「已掌握」，会被排到明天回炉复习。</p>
   </div>
-  <div class="card"><h2>🎯 薄弱ポイント</h2>${weak.length ? weakRows(weak.slice(0, 8), nExams) : `<p class="small muted" style="margin:0">做题后，正确率低于 70% 的ポイント会出现在这里（每个至少答 3 次才算）。</p>`}</div>
-  <div class="card"><h2>🔥 高频ポイント</h2>
+  <div class="card"><h2>薄弱ポイント</h2>${weak.length ? weakRows(weak.slice(0, 8), nExams) : `<p class="small muted" style="margin:0">做题后，正确率低于 70% 的ポイント会出现在这里（每个至少答 3 次才算）。</p>`}</div>
+  <div class="card"><h2>高频ポイント</h2>
     <p class="small muted" style="margin-top:-6px">近 ${nExams} 场考试里出现 ≥ 75% 的ポイント（按场数排序）。</p>
     ${hot.map((x) => { const p = POINT_BY_ID[x.id], h = heat(x, nExams);
       return `<div class="hrow kk-row"><span class="freq hot" title="${h.tip}">${h.label}</span><a class="hl" href="#/p/${x.id}">${esc(p.courseTitle)} › <b>${esc(p.title)}</b></a>
         <span class="small muted" style="flex:1">${x.q} 题 · ${x.st} 肢${x.n ? ` · 我的正确率 ${pct(x.ok, x.n)}` : ""}</span>
-        <span class="small">${{ mastered: "✅ 已掌握", learning: "🟡 学习中" }[C.S().points[x.id]?.status] || "⬜ 未学"}</span>
+        <span class="small">${{ mastered: "已掌握", learning: "学习中" }[C.S().points[x.id]?.status] || "未学"}</span>
         <button class="btn sm" data-ptox="${x.id}">练 ○×</button></div>`; }).join("")}
   </div>
   <div class="card">
@@ -226,7 +240,7 @@ export async function viewBook(bookId) {
       const score = ids.filter((id) => T.get(id)?.seq.at(-1) === 1).length;
       return `<div class="hrow kk-row"><span class="hl">${esc(D.exams[ex])}</span>
         <span class="small muted" style="flex:1">${s.done ? `做过 ${s.done}/${ids.length} · 最近一次 ${score} 题对` : "还没做"}</span>
-        <button class="btn sm" data-exam="${ex}">练习</button><button class="btn sm" data-exmock="${ex}">⏱ 模考</button></div>`;
+        <button class="btn sm" data-exam="${ex}">练习</button><button class="btn sm" data-exmock="${ex}">模考</button></div>`;
     }).join("")}
   </div>
   <div class="card">
@@ -253,36 +267,37 @@ export async function viewBook(bookId) {
 }
 
 // ---------- 错题本 ----------
+export function startDueWrong() {
+  const ks = dueWrongKeys();
+  const q = ks.filter(isQ), o = ks.filter((k) => !isQ(k));
+  if (q.length) start("q", shuffle(q), "到期错题（四选一）"); else start("ox", shuffle(o), "到期错题（○×）");
+}
 export async function viewWrong() {
   const { $, esc } = C;
   const D = await kkDB();
-  const T = tally();
-  const ks = wrongKeys().filter((k) => (isQ(k) ? D.byId[k] : D.stById[k]));
+  const T = tally(), W = wrongMap(T), today = C.today();
+  const ks = [...W.keys()].filter((k) => (isQ(k) ? D.byId[k] : D.stById[k]))
+    .sort((a, b) => W.get(a).due.localeCompare(W.get(b).due));
+  const due = ks.filter((k) => W.get(k).due <= today);
   const bookOf = (k) => (isQ(k) ? D.byId[k] : D.stById[k].q).book;
   const row = (k) => {
-    const a = T.get(k);
+    const a = T.get(k), st = W.get(k);
     const [label, text] = isQ(k) ? [`${D.exams[D.byId[k].exam]} 問${D.byId[k].no}`, D.byId[k].takeaway || D.byId[k].stemZh]
       : [`${D.exams[D.stById[k].q.exam]} 問${D.stById[k].q.no}-${D.stById[k].s.key}`, D.stById[k].s.textZh];
-    return `<div class="hrow kk-row"><span class="hl">${isQ(k) ? "四选一" : "○×"} · ${esc(label)}</span><span class="small" style="flex:1">${esc(text)}</span><span class="small muted">错 ${a.n - a.ok} 次</span><button class="btn sm" data-one="${k}">重做</button></div>`;
+    const when = st.due <= today ? `<b style="color:var(--accent)">今天到期</b>` : `${st.due.slice(5).replace("-", "/")} 再做`;
+    return `<div class="hrow kk-row"><span class="hl">${isQ(k) ? "四选一" : "○×"} · ${esc(label)}</span><span class="small" style="flex:1">${esc(text)}</span>
+      <span class="small muted" title="间隔 1→3→7 天，到期答对 3 次移出">${"●".repeat(st.step)}${"○".repeat(WRONG_INT.length - st.step)} ${when}</span><span class="small muted">错 ${a.n - a.ok} 次</span><button class="btn sm" data-one="${k}">做</button></div>`;
   };
-  $("#app").innerHTML = `<div class="crumbs"><a href="#/kk">过去问</a> › 错题本</div><h1>❌ 错题本</h1>
-  <p class="muted small" style="margin-top:0">做错后连续答对 2 次，就自动移出。</p>
-  ${ks.length ? "" : `<div class="card">🎉 错题本是空的。</div>`}
+  $("#app").innerHTML = `<div class="crumbs"><a href="#/kk">过去问</a> › 错题本</div><h1>错题本</h1>
+  <p class="muted small" style="margin-top:0">按 1 → 3 → 7 天间隔复习：到期那天答对就进一格（●），三格满了自动移出；任何时候答错都从头开始。没到期也可以先做，但答对不算进度。</p>
+  ${ks.length ? `<div class="card"><div class="row"><b>今天到期 ${due.length} 个</b><span class="muted small">　错题本共 ${ks.length} 个</span><span class="spacer"></span>${due.length ? `<button class="btn primary" id="doDue">开始做到期的 →</button>` : `<span class="small muted">今天没有到期的 </span>`}</div></div>` : `<div class="card">错题本是空的。</div>`}
   ${BOOKS.map((b) => {
     const mine = ks.filter((k) => bookOf(k) === b.id);
     if (!mine.length) return "";
-    const q = mine.filter(isQ), o = mine.filter((k) => !isQ(k));
-    return `<div class="card"><div class="row"><h2 style="margin:0">${esc(b.title)}</h2><span class="spacer"></span>
-      ${q.length ? `<button class="btn sm primary" data-wq="${b.id}">重做四选一 ${q.length} 题</button>` : ""}${o.length ? `<button class="btn sm primary" data-wo="${b.id}">重做 ○× ${o.length} 肢</button>` : ""}</div>
-      <div style="margin-top:8px">${mine.map(row).join("")}</div></div>`;
+    return `<div class="card"><h2>${esc(b.title)}</h2><div>${mine.map(row).join("")}</div></div>`;
   }).join("")}`;
-  $("#app").onclick = (e) => {
-    const b = e.target.closest("button"); if (!b) return;
-    const d = b.dataset;
-    if (d.one) start(isQ(d.one) ? "q" : "ox", [d.one], "错题重做");
-    if (d.wq) start("q", shuffle(ks.filter((k) => isQ(k) && bookOf(k) === d.wq)), `${BOOK_BY_ID[d.wq].title} 错题（四选一）`);
-    if (d.wo) start("ox", shuffle(ks.filter((k) => !isQ(k) && bookOf(k) === d.wo)), `${BOOK_BY_ID[d.wo].title} 错题（○×）`);
-  };
+  if ($("#doDue")) $("#doDue").onclick = startDueWrong;
+  $("#app").onclick = (e) => { const b = e.target.closest("[data-one]"); if (b) start(isQ(b.dataset.one) ? "q" : "ox", [b.dataset.one], "错题重做"); };
 }
 
 // ---------- 模考：交卷前不显示对错 ----------
@@ -297,7 +312,7 @@ function startMock(keys, title) {
     if (!mock || mock.done) return clearInterval(mockTimer);
     const left = mock.limit - (Date.now() - mock.t0) / 1000;
     const el = document.querySelector("#mockTimer");
-    if (el) { el.textContent = `⏱ ${fmtS(Math.max(0, left))}`; el.classList.toggle("late", left < 300); }
+    if (el) { el.textContent = `${fmtS(Math.max(0, left))}`; el.classList.toggle("late", left < 300); }
     if (left <= 0) { submitMock(true); }
   }, 1000);
   if (location.hash === "#/kk/mock") viewMock(); else location.hash = "#/kk/mock";
@@ -309,7 +324,7 @@ export async function viewMock() {
   if (mock.done) return viewMockResult(D);
   const q = D.byId[mock.keys[mock.i]], a = mock.ans[q.id];
   const left = mock.limit - (Date.now() - mock.t0) / 1000;
-  $("#app").innerHTML = `<div class="crumbs"><a href="#/kk">过去问</a> › ${esc(mock.title)}<span class="spacer"></span><span class="kk-timer" id="mockTimer">⏱ ${fmtS(Math.max(0, left))}</span></div>
+  $("#app").innerHTML = `<div class="crumbs"><a href="#/kk">过去问</a> › ${esc(mock.title)}<span class="spacer"></span><span class="kk-timer" id="mockTimer">${fmtS(Math.max(0, left))}</span></div>
   <div class="mock-grid">${mock.keys.map((k, i) => `<button class="${i === mock.i ? "cur" : ""} ${mock.ans[k] ? "done" : ""}" data-go="${i}">${i + 1}</button>`).join("")}</div>
   <div class="card kk-q">
     <div class="row"><b>第 ${mock.i + 1} 题</b><span class="muted small">${esc(BOOK_BY_ID[q.book]?.title || "")} · ${esc(D.exams[q.exam])} 問${q.no}</span><span class="spacer"></span><button class="btn sm" id="zhBtn">中文意思</button></div>
@@ -365,7 +380,7 @@ function viewMockResult(D) {
   ${n === EXAM_TOTAL ? `<p class="small muted">${PASS_HINT}。</p>` : `<p class="small muted">参考：${PASS_HINT}，折合正确率约 66〜76%。</p>`}
   ${byBook.length > 1 ? `<div class="card"><h2>各科得分</h2>${byBook.map((x) => `<div class="hrow"><span class="hl">${esc(x.b.title)}</span><div class="hbar single"><i class="${x.ok / x.n >= 0.7 ? "ok" : "ng"}" style="width:${(x.ok / x.n) * 100}%"></i></div><span class="hv">${x.ok}/${x.n}</span></div>`).join("")}</div>` : ""}
   <div class="card">${mock.keys.map((k, i) => { const q = D.byId[k], a = mock.ans[k];
-    return `<div class="hrow kk-row"><span>${a === q.answer ? "✅" : "❌"}</span><span class="hl">第 ${i + 1} 题 · ${esc(D.exams[q.exam])} 問${q.no}</span>
+    return `<div class="hrow kk-row"><span>${a === q.answer ? '<i class="rk ok">○</i>' : '<i class="rk ng">×</i>'}</span><span class="hl">第 ${i + 1} 题 · ${esc(D.exams[q.exam])} 問${q.no}</span>
       <span class="small muted" style="flex:1">你选 ${a || "—"} · 正解 ${q.answer}</span><button class="btn sm" data-rv="${i}">看解析</button></div>`; }).join("")}</div>
   <div class="row"><button class="btn primary" id="rvAll">逐题看解析</button><a class="btn" href="#/kk">回过去问</a></div>`;
   const review = (i) => { start("q", mock.keys, `${mock.title} 复盘`, { preset: { ...mock.ans } }); run.i = i; run.picked = run.preset[mock.keys[i]] ?? 0; viewRun(); };
@@ -376,7 +391,7 @@ function viewMockResult(D) {
 // ---------- 做题页 ----------
 const nl = (s) => C.esc(String(s ?? "").replace(/^[【（(]?問\s*\d+[】）)]\s*/, "")).replace(/\n/g, "<br>");
 const typeName = { single: "四选一", count: "个数问题", combo: "组合问题" };
-const ptLinks = (ids) => ids.map((id) => { const p = POINT_BY_ID[id]; return p ? `<a class="pt-link" href="#/p/${id}">📖 ${C.esc(p.courseTitle)} › ${C.esc(p.title)}</a>` : ""; }).join(" ");
+const ptLinks = (ids) => ids.map((id) => { const p = POINT_BY_ID[id]; return p ? `<a class="pt-link" href="#/p/${id}">${C.esc(p.courseTitle)} › ${C.esc(p.title)}</a>` : ""; }).join(" ");
 
 export async function viewRun() {
   const { $, esc } = C;
@@ -391,7 +406,7 @@ export async function viewRun() {
   if (run.kind === "q") {
     const q = D.byId[key], ans = run.picked;
     $("#app").innerHTML = head + `<div class="card kk-q">
-      <div class="row"><b>${esc(D.exams[q.exam])} 【問${q.no}】</b><span class="muted small">${esc(BOOK_BY_ID[q.book]?.title || "")} · ${typeName[q.type]}</span><span class="spacer"></span><button class="btn sm" id="zhBtn">中文意思</button></div>
+      <div class="row"><b>${esc(D.exams[q.exam])} 【問${q.no}】</b><span class="muted small">${esc(BOOK_BY_ID[q.book]?.title || "")} · ${typeName[q.type]}</span><span class="spacer"></span><button class="btn sm" id="zhBtn">中文意思</button><button class="btn sm" id="sideBtn">讲义 / AI 老师</button></div>
       <div class="kk-stem">${nl(q.stem)}</div>
       <div class="kk-zh" id="zh" hidden>${esc(q.stemZh)}</div>
       ${q.items?.length ? `<div class="kk-items">${q.items.map((it, i) => {
@@ -412,7 +427,7 @@ export async function viewRun() {
     const ans = run.picked; // "o" | "x"
     const right = shown && ((ans === "o") === x.s.ok);
     $("#app").innerHTML = head + `<div class="card kk-q">
-      <div class="row"><span class="muted small">${esc(D.exams[q.exam])} 【問${q.no}】 第 ${esc(x.s.key)} 肢 · ${esc(BOOK_BY_ID[q.book]?.title || "")}</span><span class="spacer"></span><button class="btn sm" id="zhBtn">中文意思</button></div>
+      <div class="row"><span class="muted small">${esc(D.exams[q.exam])} 【問${q.no}】 第 ${esc(x.s.key)} 肢 · ${esc(BOOK_BY_ID[q.book]?.title || "")}</span><span class="spacer"></span><button class="btn sm" id="zhBtn">中文意思</button><button class="btn sm" id="sideBtn">讲义 / AI 老师</button></div>
       <details class="kk-ctx"><summary class="small muted">题目前提（判决文、人物关系等在这里）</summary><div class="kk-stem small">${nl(q.stem)}</div></details>
       <div class="kk-ox-text">${nl(text)}</div>
       <div class="kk-zh" id="zh" hidden>${esc(x.s.textZh)}</div>
@@ -423,19 +438,42 @@ export async function viewRun() {
       </div>
     </div>
     ${shown ? `<div class="card kk-exp ${right ? "ok" : "ng"}">
-      <div class="kk-verdict">${right ? "✅ 答对了" : "❌ 答错了"}　正确：<b>${x.s.ok ? "○" : "×"}</b></div>
+      <div class="kk-verdict">${right ? '<i class="rk ok">○</i> 答对了' : '<i class="rk ng">×</i> 答错了'}　正确：<b>${x.s.ok ? "○" : "×"}</b></div>
       ${stmtHtml(x.s, x.pts, true)}
-      ${q.lawChange ? `<div class="kk-law">⚠️ 法改正注意：${esc(q.lawChange)}</div>` : ""}
-      <div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn primary" id="kkNext">下一肢 →</button></div>
+      ${q.lawChange ? `<div class="kk-law">法改正注意：${esc(q.lawChange)}</div>` : ""}
+      <div class="row" style="margin-top:12px"><span class="spacer"></span>${C.ai() ? `<button class="btn" id="kkAsk">问 AI 老师</button>` : ""}<button class="btn primary" id="kkNext">下一肢 →</button></div>
     </div>` : `<p class="small muted">键盘：O / X（或 1 / 2）。</p>`}`;
     if (!shown) document.querySelectorAll("[data-ox]").forEach((b) => b.onclick = () => answerOX(x, b.dataset.ox));
   }
+  // 左边题目、右边侧栏（讲义 / AI 老师），不离开做题页
+  const app = $("#app"), main = document.createElement("div"), wrap = document.createElement("div"), side = document.createElement("aside");
+  main.className = "kk-main"; main.append(...app.childNodes);
+  side.className = "kk-side"; side.id = "kkSide";
+  wrap.className = "kk-split"; wrap.append(main, side); app.append(wrap);
+  const pts = isQ(key) ? D.byId[key].points : D.stById[key].pts;
+  C.mountSide(side, pts);
   $("#zhBtn").onclick = () => { $("#zh").hidden = !$("#zh").hidden; };
+  $("#sideBtn").onclick = () => C.openSide(pts, "explain");
   if ($("#kkNext")) $("#kkNext").onclick = next;
+  if ($("#kkAsk")) $("#kkAsk").onclick = () => askAbout(D, key, pts);
+  C.linkLaws(main);
   $("#kkQuit").onclick = () => {
     if (run.preset) { location.hash = "#/kk/mock"; return; }
     run.keys = run.keys.slice(0, run.i + (shown ? 1 : 0)); run.i = run.keys.length; viewRun();
   };
+}
+// 题目页「问 AI 老师」：带着题目、选项、正解和我的答案，在右边侧栏里直接问（对话存进相关ポイント）
+function askAbout(D, key, pts) {
+  const strip = (t) => String(t || "").replace(/^[【（(]?問\s*\d+[】）)]\s*/, "");
+  if (isQ(key)) {
+    const q = D.byId[key], a = run.picked;
+    const items = q.items?.length ? q.items.map((it) => `${it.label}　${it.text}`).join("\n") + "\n" : "";
+    C.askAI(pts, `我在做过去问 ${D.exams[q.exam]} 問${q.no}：\n【题目】${strip(q.stem)}\n${items}【选项】\n${q.choices.map((c, i) => `${i + 1}　${c}`).join("\n")}\n【正解】${q.answer}　【我的答案】${a || "没答"}\n请讲解这道题：每个选项为什么对或错、考的是哪条规则，以及我${a === q.answer ? "还有哪里可能没真正弄懂" : "错在哪里、下次怎么避免"}。`);
+  } else {
+    const x = D.stById[key], q = x.q;
+    const text = q.type === "single" ? q.choices[x.i] : q.items[x.i]?.text;
+    C.askAI(pts, `我在做一問一答（${D.exams[q.exam]} 問${q.no} 第 ${x.s.key} 肢）：\n【题目前提】${strip(q.stem)}\n【这一肢】${text}\n【正确】${x.s.ok ? "○" : "×"}　【我的答案】${run.picked === "o" ? "○" : "×"}\n请讲清楚为什么是${x.s.ok ? "○" : "×"}，依据是什么，容易和什么混淆。`);
+  }
 }
 function stmtHtml(s, pts, full) {
   const { esc, md } = C;
@@ -443,7 +481,7 @@ function stmtHtml(s, pts, full) {
     <div class="kk-st-h"><b>${esc(s.key)}</b> <span class="mk">${s.ok ? "○" : "×"}</span> ${full ? "" : `<span class="small">${esc(s.textZh)}</span>`}</div>
     ${full ? `<div class="small muted" style="margin-bottom:4px">${esc(s.textZh)}</div>` : ""}
     <div class="kk-st-b">${md(s.explain)}</div>
-    <div class="small muted">${s.law ? `依据：${esc(s.law)}　` : ""}${ptLinks(pts || [])}</div>
+    <div class="small muted">${s.law ? `依据：${C.lawHtml(s.law)}　` : ""}${ptLinks(pts || [])}</div>
   </div>`;
 }
 function explainQ(q, ans) {
@@ -451,11 +489,11 @@ function explainQ(q, ans) {
   const right = ans === q.answer;
   const last = run.i >= run.keys.length - 1;
   return `<div class="card kk-exp ${right ? "ok" : "ng"}">
-    <div class="kk-verdict">${right ? "✅ 答对了" : ans ? `❌ 答错了（你选 ${ans}）` : "❌ 没作答"}　正解：<b>${q.answer}</b></div>
-    ${q.takeaway ? `<p class="kk-take">💡 ${esc(q.takeaway)}</p>` : ""}
-    ${q.lawChange ? `<div class="kk-law">⚠️ 法改正注意：${esc(q.lawChange)}</div>` : ""}
+    <div class="kk-verdict">${right ? '<i class="rk ok">○</i> 答对了' : ans ? `<i class="rk ng">×</i> 答错了（你选 ${ans}）` : '<i class="rk ng">×</i> 没作答'}　正解：<b>${q.answer}</b></div>
+    ${q.takeaway ? `<p class="kk-take">${esc(q.takeaway)}</p>` : ""}
+    ${q.lawChange ? `<div class="kk-law">法改正注意：${esc(q.lawChange)}</div>` : ""}
     ${q.statements.map((s) => stmtHtml(s, s.points?.length ? s.points : q.points, false)).join("")}
-    <div class="row" style="margin-top:12px"><span class="small muted">相关ポイント：${ptLinks(q.points)}</span><span class="spacer"></span><button class="btn primary" id="kkNext">${run.preset && last ? "回到成绩" : "下一题 →"}</button></div>
+    <div class="row" style="margin-top:12px"><span class="small muted">相关ポイント：${ptLinks(q.points)}</span><span class="spacer"></span>${C.ai() ? `<button class="btn" id="kkAsk">问 AI 老师</button>` : ""}<button class="btn primary" id="kkNext">${run.preset && last ? "回到成绩" : "下一题 →"}</button></div>
   </div>`;
 }
 function answerQ(q, n) {
@@ -491,7 +529,7 @@ function viewDone(D) {
     <div class="stat"><div class="v">${pct(ok, n)}</div><div class="k">正确率</div></div>
     <div class="stat"><div class="v">${fmtS(secs)}</div><div class="k">用时</div></div>
   </div>
-  <div class="card">${run.keys.slice(0, n).map((k, i) => `<div class="hrow kk-row"><span>${run.res[i] ? "✅" : "❌"}</span><span class="hl" style="flex:1">${esc(name(k))}</span><button class="btn sm" data-one="${k}">再做</button></div>`).join("") || "没有作答。"}</div>
+  <div class="card">${run.keys.slice(0, n).map((k, i) => `<div class="hrow kk-row"><span>${run.res[i] ? '<i class="rk ok">○</i>' : '<i class="rk ng">×</i>'}</span><span class="hl" style="flex:1">${esc(name(k))}</span><button class="btn sm" data-one="${k}">再做</button></div>`).join("") || "没有作答。"}</div>
   <div class="row">${wrongHere.length ? `<button class="btn primary" id="again">重做这轮错的 ${wrongHere.length} ${run.kind === "q" ? "题" : "肢"}</button>` : ""}<a class="btn" href="#/kk">回过去问</a></div>`;
   const kind = run.kind;
   if ($("#again")) $("#again").onclick = () => start(kind, wrongHere, "重做错的");
@@ -538,7 +576,7 @@ export async function fillPointCard(id, box) {
     </div>
     ${qs.length ? `<details style="margin-top:8px"><summary class="small muted">题目清单</summary>${qs.map((q) => {
       const a = T.get(q.id);
-      return `<div class="hrow kk-row small"><span>${a ? (a.seq.at(-1) ? "✅" : "❌") : "⬜"}</span><span class="hl">${esc(D.exams[q.exam])} 問${q.no}</span><span style="flex:1">${esc(q.takeaway || q.stemZh)}</span><button class="btn sm" data-kq="${q.id}">做</button></div>`;
+      return `<div class="hrow kk-row small"><span>${a ? (a.seq.at(-1) ? '<i class="rk ok">○</i>' : '<i class="rk ng">×</i>') : '<i class="rk">－</i>'}</span><span class="hl">${esc(D.exams[q.exam])} 問${q.no}</span><span style="flex:1">${esc(q.takeaway || q.stemZh)}</span><button class="btn sm" data-kq="${q.id}">做</button></div>`;
     }).join("")}</details>` : ""}`;
   const pt = POINT_BY_ID[id];
   if (box.querySelector("#kpO")) box.querySelector("#kpO").onclick = () => start("ox", shuffle(st.map((x) => x.key)), `${pt.title} ○×`);
@@ -555,5 +593,32 @@ export async function courseAccuracy() {
     const k = `${b.id}:${c.n}`;
     const keys = [...D.qs.filter((q) => q.points.some((p) => courseKey(p) === k)).map((q) => q.id), ...D.stmts.filter((x) => x.pts.some((p) => courseKey(p) === k)).map((x) => x.key)];
     return { b, c, ...statFor(keys, T) };
+  }));
+}
+
+// ---------- 给其他页面用 ----------
+export function startQ(keys, title) { start("q", keys, title); }
+export async function lawChangeQs() {
+  const D = await kkDB();
+  return D.qs.filter((q) => q.lawChange).map((q) => ({ ...q, examName: D.exams[q.exam] }));
+}
+// 预测得分：每科用最近 30 次「四选一」（含模考）的正确率 × 本试题数。少于 10 次算「数据不足」。
+export async function predictScore() {
+  const D = await kkDB();
+  const recent = {};
+  for (const [k, ok] of log()) { if (!isQ(k)) continue; const q = D.byId[k]; if (!q) continue; (recent[q.book] ||= []).push(ok); }
+  return BOOKS.map((b) => {
+    const has = D.byBook[b.id].qs.length > 0;
+    const r = (recent[b.id] || []).slice(-30);
+    const acc = r.length ? r.reduce((x, y) => x + y, 0) / r.length : null;
+    return { b, has, n: r.length, acc, est: r.length >= 10 ? acc * b.examQ : null };
+  });
+}
+// 每科过去问累计：{ kenri: {ok, n, done, total}, ... }
+export async function bookAccuracy() {
+  const D = await kkDB(), T = tally();
+  return Object.fromEntries(BOOKS.map((b) => {
+    const keys = [...D.byBook[b.id].qs.map((q) => q.id), ...D.byBook[b.id].st.map((x) => x.key)];
+    return [b.id, { ...statFor(keys, T), total: D.byBook[b.id].qs.length }];
   }));
 }

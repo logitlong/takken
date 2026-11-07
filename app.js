@@ -1,7 +1,8 @@
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS } from "./toc.js?v=67aa790b02";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=0d93e61a7b";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=67aa790b02";
-import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=67aa790b02";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=0d93e61a7b";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, dueWrongKeys, startDueWrong, startQ, lawChangeQs, predictScore, bookAccuracy, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=0d93e61a7b";
+import { initExtras, lawHtml, linkLaws, viewNums, pointNumbers, viewLawChange, trendCard, mountTrend } from "./extras.js?v=0d93e61a7b";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -50,7 +51,11 @@ async function doSync() {
 }
 function touchDay() { S.days[today()] = (S.days[today()] || 0) + 1; }
 
-initKK({ S: () => S, save, touchDay: () => touchDay(), $: (s, el) => $(s, el), esc: (x) => esc(x), md: (x) => md(x), addDays: (n) => addDays(n), today: () => today() });
+// 题目页「问 AI 老师」：在做题页右边侧栏里直接问，不跳页（见下方「做题页侧栏」）
+const askAI = (pts, text) => { openSide(pts, "chat"); sideSend(text); };
+initKK({ S: () => S, save, touchDay: () => touchDay(), $: (s, el) => $(s, el), esc: (x) => esc(x), md: (x) => md(x), addDays: (n) => addDays(n), today: () => today(),
+  lawHtml, linkLaws, ai: () => ENV.ai, askAI, mountSide: (el, pts) => mountSide(el, pts), openSide: (pts, tab) => openSide(pts, tab) });
+initExtras({ S: () => S, $: (s, el) => $(s, el), esc: (x) => esc(x), md: (x) => md(x), today: () => today(), addDays: (n) => addDays(n), startQ });
 
 const statusOf = (id) => S.points[id]?.status || "new";
 const impOf = (pt) => S.points[pt.id]?.imp || pt.imp;
@@ -78,12 +83,12 @@ function renderNav() {
   const r = location.hash.split("/")[1] || "";
   const due = dueList().length, stuck = openStuck().length;
   const item = (h, label, n) => `<a href="#/${h}" class="${r === h ? "on" : ""}">${label}${n ? `<span class="badge">${n}</span>` : ""}</a>`;
-  $("#nav").innerHTML = item("", "首页") + item("toc", "目录") + item("review", "今日复习", due) + item("kk", "过去问", wrongKeys().length) + item("stuck", "卡点本", stuck) + item("stats", "统计");
+  $("#nav").innerHTML = item("", "首页") + item("toc", "目录") + item("review", "今日复习", due) + item("kk", "过去问", dueWrongKeys().length) + item("nums", "速记表") + item("lawchange", "法改正") + item("stuck", "卡点本", stuck) + item("stats", "统计");
   const sy = { off: "", syncing: "sync-ing", ok: "sync-ok", error: "sync-err" }[sync.state];
   const sb = $("#syncBtn");
   sb.classList.toggle("on", r === "sync");
   sb.title = `同步：${syncTip()}`;
-  sb.innerHTML = `☁️${sy ? `<i class="sync-dot ${sy}"></i>` : ""}`;
+  sb.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M7 18.5h10a4 4 0 0 0 .6-7.95A5.5 5.5 0 0 0 7 9.6 4.5 4.5 0 0 0 7 18.5z"/></svg>${sy ? `<i class="sync-dot ${sy}"></i>` : ""}`;
 }
 
 // ---------------- 首页 ----------------
@@ -98,13 +103,13 @@ function todayTasks() {
   const startedToday = POINTS.filter((p) => S.points[p.id]?.started === today()).length;
   const daysLeft = Math.max(1, daysBetween(today(), plan.by) + 1);
   const newPerDay = fresh.length + startedToday ? Math.ceil((fresh.length + startedToday) / daysLeft) : 0;
-  const kt = kkToday(), due = dueList().length, wrong = wrongKeys().length;
+  const kt = kkToday(), due = dueList().length, wrong = dueWrongKeys().length, wrongAll = wrongKeys().length;
   const lm = lastMock(), mockAgo = lm ? Math.floor((Date.now() / 1000 - lm.t) / 86400) : null;
   const tasks = [];
   if (newPerDay) tasks.push({ done: startedToday >= newPerDay, text: `学新课 <b>${Math.min(startedToday, newPerDay)} / ${newPerDay}</b> 节`, sub: `还剩 ${fresh.length} 节未学，${plan.by} 前学完`, href: fresh[0] ? `#/p/${fresh[0].id}` : "#/toc", btn: "去学" });
   tasks.push({ done: !due, text: due ? `复习 <b>${due}</b> 节` : "复习：今天没有要复习的", href: "#/review", btn: "去复习" });
   tasks.push({ done: kt.ox >= plan.ox, text: `一問一答 ○× <b>${Math.min(kt.ox, plan.ox)} / ${plan.ox}</b> 肢`, sub: kt.q ? `另外做了四选一 ${kt.q} 题` : "", href: "#/kk", btn: "去做题" });
-  tasks.push({ done: !wrong, text: wrong ? `错题本还有 <b>${wrong}</b> 个待重做` : "错题本：清空了", href: "#/kk/wrong", btn: "去重做" });
+  tasks.push({ done: !wrong, text: wrong ? `错题今天到期 <b>${wrong}</b> 个` : "错题：今天没有到期的", sub: wrongAll ? `错题本共 ${wrongAll} 个，按 1→3→7 天间隔复习` : "", href: "#/kk/wrong", btn: "去重做" });
   tasks.push({ done: mockAgo !== null && mockAgo < 7, text: "每周一次模考", sub: lm ? `上次 ${mockAgo === 0 ? "今天" : `${mockAgo} 天前`}：${esc(lm.title)} ${lm.score}/${lm.n}` : "还没做过模考", href: "#/kk", btn: "去模考" });
   return tasks;
 }
@@ -117,16 +122,33 @@ function viewHome() {
   const plan = planOf();
   const kt = kkTotals();
 
+  let streak = 0; for (let i = S.days[today()] ? 0 : 1; S.days[addDays(-i)]; i++) streak++; // 今天还没学也不算断
+  const rest = tasks.length - nDone, C = 2 * Math.PI * 42;
+  const FIRE = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c1 3.5-1.5 5-1.5 7.5 0 1.4 1 2.5 2.3 2.5 1.6 0 2.4-1.3 2.2-3.2C17.6 10.6 19 13 19 15.5 19 19.1 15.9 22 12 22s-7-2.9-7-6.5C5 10 10.5 8 12 2z"/></svg>`;
+  const nb = next ? BOOK_BY_ID[next.book] : null;
   $("#app").innerHTML = `
-  <div class="stats">
-    <div class="stat"><div class="v">${left}</div><div class="k">天后考试（${EXAM_DATE}）</div></div>
-    <div class="stat"><div class="v">${m}<span class="muted small"> / ${POINTS.length}</span></div><div class="k">已掌握的ポイント（已导入部分）</div></div>
-    <div class="stat"><div class="v">${dueList().length}</div><div class="k">今天要复习</div></div>
-    <div class="stat"><div class="v">${kt.n ? Math.round((kt.ok / kt.n) * 100) + "%" : "—"}</div><div class="k">过去问正确率${kt.n ? `（${kt.n} 次）` : ""}</div></div>
+  <div class="hero">
+    <div class="hero-today">
+      <div class="ring ${rest ? "" : "full"}"><svg viewBox="0 0 100 100"><circle class="bg" cx="50" cy="50" r="42" fill="none" stroke-width="11"/>
+        <circle class="fg" cx="50" cy="50" r="42" fill="none" stroke-width="11" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - nDone / tasks.length)}"/></svg>
+        <div class="ring-t">${nDone}/${tasks.length}<small>今日任务</small></div></div>
+      <div style="min-width:0">
+        <div class="hero-msg">${rest ? `今天还差 ${rest} 项，加油` : "今天的任务全部完成！"}</div>
+        <div class="chips">
+          <span class="chip fire">${FIRE}连续 <b>${streak}</b> 天</span>
+          <span class="chip">距考试 <b>${left}</b> 天</span>
+          <span class="chip">已掌握 <b>${m}</b> / ${POINTS.length}</span>
+          ${kt.n ? `<span class="chip">过去问 <b>${Math.round((kt.ok / kt.n) * 100)}%</b></span>` : ""}
+        </div>
+      </div>
+    </div>
+    ${next ? `<a class="hero-go" href="#/p/${next.id}"><span class="k">${statusOf(next.id) === "learning" ? "接着学" : "下一节"} · ${esc(nb.title)} 第${next.course}コース</span>
+      <span class="t">${esc(next.title)}</span><span class="s">${esc(next.courseTitle)}</span><span class="arrow">→</span></a>`
+      : `<div class="hero-go"><span class="t">已导入的部分全部掌握了！</span><span class="s">等新科目导入后继续</span></div>`}
   </div>
   <div class="card">
-    <div class="row"><h2 style="margin:0">📅 今日计划</h2><span class="spacer"></span><span class="muted small">完成 ${nDone} / ${tasks.length}</span></div>
-    <div class="plan">${tasks.map((t) => `<div class="plan-row ${t.done ? "done" : ""}"><span class="plan-ck">${t.done ? "✅" : "⬜"}</span>
+    <div class="row"><h2 style="margin:0">今日计划</h2><span class="spacer"></span><span class="muted small">完成 ${nDone} / ${tasks.length}</span></div>
+    <div class="plan">${tasks.map((t) => `<div class="plan-row ${t.done ? "done" : ""}"><span class="plan-ck"></span>
       <div style="flex:1"><div>${t.text}</div>${t.sub ? `<div class="small muted">${t.sub}</div>` : ""}</div>
       ${t.done ? "" : `<a class="btn sm" href="${t.href}">${t.btn}</a>`}</div>`).join("")}</div>
     <details class="small" style="margin-top:8px"><summary class="muted">调整计划</summary>
@@ -137,19 +159,15 @@ function viewHome() {
       <p class="muted" style="margin:6px 0 0">新课数 = 剩下没学的节数 ÷ 剩余天数，每天自动重算。复习按 1、3、7、14、30、60 天安排；做错的题对应的已掌握ポイント会排到第二天回炉。</p>
     </details>
   </div>
-  <div class="card">
-    <div class="row"><h2 style="margin:0">继续学习</h2><span class="spacer"></span><span class="muted small">已学习 ${studyDays} 天</span></div>
-    ${next ? `<p style="margin:8px 0 12px">${esc(next.bookTitle)} › 第${next.course}コース「${esc(next.courseTitle)}」 › <b>第${next.n}ポイント ${esc(next.title)}</b></p>
-      <a class="btn primary" href="#/p/${next.id}">开始这一节 →</a>` : `<p>🎉 已导入的部分全部掌握了！</p>`}
-  </div>
-  <div class="card">
-    <h2>四科进度</h2>
-    ${BOOKS.map((b) => { const x = bookStat(b);
-      return `<div class="hrow book-row"><a class="hl" href="#/toc/${b.id}"><b>${esc(b.title)}</b></a><span class="small muted" style="width:64px">本试 ${b.examQ} 题</span>
-        ${x.total ? `<div class="hbar">${x.m ? `<i class="seg-m" style="flex:${x.m}"></i>` : ""}${x.l ? `<i class="seg-l" style="flex:${x.l}"></i>` : ""}${x.total - x.m - x.l ? `<i class="seg-n" style="flex:${x.total - x.m - x.l}"></i>` : ""}</div><span class="hv">${x.m}/${x.total}</span>`
-          : `<span class="small muted" style="flex:1">📦 教材内容待导入</span>`}</div>`; }).join("")}
-    <div class="legend" style="margin-top:8px"><span><i class="dot" style="background:var(--good)"></i>已掌握</span><span><i class="dot" style="background:var(--warn)"></i>学习中</span><span><i class="dot" style="background:var(--line)"></i>未学</span></div>
-  </div>
+  <div class="card" id="predict"><h2>预测得分</h2><div class="empty">计算中…</div></div>
+  <h2 class="sec-h">四科进度 <span class="muted small">点进去看目录</span></h2>
+  <div class="sb-grid">${BOOKS.map((b) => { const x = bookStat(b);
+    return `<a class="sb-card bk-${b.id} ${x.total ? "" : "off"}" href="#/toc/${b.id}">
+      <div class="row"><b class="sb-t">${esc(b.title)}</b><span class="spacer"></span><span class="small sb-q">${b.examQ} 题</span></div>
+      ${x.total ? `<div class="sb-big">${Math.round((x.m / x.total) * 100)}<small>%</small></div>
+        <div class="sb-bar"><i style="width:${(x.m / x.total) * 100}%"></i><i class="l" style="width:${(x.l / x.total) * 100}%"></i></div>
+        <div class="small sb-sub">已掌握 ${x.m} · 学习中 ${x.l} · 共 ${x.total} 节</div>`
+      : `<div class="sb-empty">教材待导入</div><div class="small sb-sub">${esc(b.qNo)}</div>`}</a>`; }).join("")}</div>
   <div class="card">
     <h2>每一节怎么学</h2>
     <ol style="margin:0;padding-left:1.3em">
@@ -162,36 +180,62 @@ function viewHome() {
   </div>`;
   const setPlan = () => { const p = planOf(); p.by = $("#planBy").value || p.by; p.ox = Math.max(0, Number($("#planOx").value) || 0); p.t = Date.now(); save(); viewHome(); };
   $("#planBy").onchange = setPlan; $("#planOx").onchange = setPlan;
+  predictScore().then((rows) => {
+    const box = $("#predict"); if (!box) return;
+    const ok = rows.filter((x) => x.est !== null), all = ok.length === rows.length;
+    const sum = ok.reduce((a, x) => a + x.est, 0), maxQ = ok.reduce((a, x) => a + x.b.examQ, 0);
+    box.innerHTML = `<div class="row"><h2 style="margin:0">预测得分</h2><span class="spacer"></span>
+      ${all ? `<b class="pred-total ${sum >= 38 ? "ok" : sum >= 33 ? "mid" : "ng"}">${Math.round(sum)} / ${EXAM_TOTAL}</b>` : ok.length ? `<span class="small muted">已有数据的科目：约 ${Math.round(sum)} / ${maxQ}</span>` : ""}</div>
+      <p class="small muted" style="margin:4px 0 8px">每科用最近 30 次四选一（含模考）的正确率 × 本试题数估算；少于 10 次显示「数据不足」。${PASS_HINT}。</p>
+      ${rows.map((x) => `<div class="hrow"><span class="hl">${esc(x.b.title)}</span>
+        ${x.est !== null ? `<div class="hbar single"><i class="${x.acc >= 0.7 ? "ok" : "ng"}" style="width:${x.acc * 100}%"></i></div><span class="hv">${x.est.toFixed(1)} / ${x.b.examQ}</span>`
+          : `<span class="small muted" style="flex:1">${!x.has ? "题库待导入" : `数据不足（最近做了 ${x.n} 题，需要 10 题）`}</span><span class="hv">— / ${x.b.examQ}</span>`}</div>`).join("")}
+      ${all ? "" : `<p class="small muted" style="margin:8px 0 0">四科都有数据后才显示总分预测。</p>`}`;
+  }).catch(() => {});
 }
 
 // ---------------- 目录（四科） ----------------
 function viewToc(bookId) {
   const b = BOOK_BY_ID[bookId] || BOOKS[0];
   const tabs = `<div class="book-tabs">${BOOKS.map((x) => { const st = bookStat(x);
-    return `<a class="book-tab ${x.id === b.id ? "on" : ""} ${st.total ? "" : "off"}" href="#/toc/${x.id}"><b>${esc(x.title)}</b>
+    return `<a class="book-tab bk-${x.id} ${x.id === b.id ? "on" : ""} ${st.total ? "" : "off"}" href="#/toc/${x.id}"><b>${esc(x.title)}</b>
       <span class="small">${st.total ? `${st.m}/${st.total} 已掌握` : "待导入"} · ${x.examQ} 题</span></a>`; }).join("")}</div>`;
   if (!b.courses.length) {
     $("#app").innerHTML = `<h1>目录</h1>${tabs}<div class="card"><h2>${esc(b.title)}（${esc(b.zh)}）</h2>
-      <p style="margin:0">📦 这一科的教材内容（朗读、原文、讲义、闪卡）还没导入。</p>
+      <p style="margin:0">这一科的教材内容（朗读、原文、讲义、闪卡）还没导入。</p>
       <p class="small muted" style="margin:8px 0 0">本试 ${b.examQ} 题（${esc(b.qNo)}）${b.note ? ` · ${esc(b.note)}` : ""}。导入后会和権利関係一样，按コース › ポイント 排列。</p></div>`;
     return;
   }
   const st = bookStat(b);
+  const nowCourse = (POINTS.find((p) => p.book === b.id && statusOf(p.id) === "learning") || POINTS.find((p) => p.book === b.id && statusOf(p.id) === "new"))?.course;
+  const SC = 2 * Math.PI * 16, nExamsHint = 8;
   $("#app").innerHTML = `<h1>目录</h1>${tabs}
-  <p class="muted small">${esc(b.title)}（${esc(b.zh)}）${b.volume ? ` · ${b.volume}` : ""} · ${b.courses.length} 个コース · ${st.total} 个ポイント · 本试 ${b.examQ} 题（${esc(b.qNo)}）　<span class="freq hot">🔥</span> 高频　<span class="freq warm">⭐</span> 常考（近几场过去问的出题场数）</p>
+  <div class="toc-head bk-${b.id}"><div class="sb-big">${Math.round((st.m / st.total) * 100)}<small>%</small></div>
+    <div style="flex:1;min-width:180px"><b>${esc(b.title)}</b>（${esc(b.zh)}）${b.volume ? ` · ${b.volume}` : ""}<div class="small">${b.courses.length} 个コース · ${st.total} 个ポイント · 已掌握 ${st.m} · 本试 ${b.examQ} 题（${esc(b.qNo)}）</div>
+    <div class="sb-bar"><i style="width:${(st.m / st.total) * 100}%"></i><i class="l" style="width:${(st.l / st.total) * 100}%"></i></div></div></div>
+  <details class="toc-help" open><summary>怎么看这一页</summary>
+    <div class="toc-help-grid">
+      <div><b>第1コース … p.1 · 已掌握 0/6</b><br>p.1 = 这门コース从教材第 1 页开始；0/6 = 这门コース 6 个ポイント里已掌握 0 个。</div>
+      <div><b>左边的小圆点</b><br><i class="st mastered"></i> 已掌握　<i class="st learning"></i> 学习中　<i class="st"></i> 还没学；<span class="due-tag">复习</span> = 今天到了复习的日子。</div>
+      <div><b>重要度（教材标注）</b><br><span class="imp A">A</span> 最重要，必考　<span class="imp B">B</span> 重要　<span class="imp C">C</span> 一般，有余力再看</div>
+      <div><b>出题场数（近 R2〜R7 共 ${nExamsHint} 场考试）</b><br><span class="freq hot">7/8场</span> = 8 场考试里有 7 场考到这个ポイント。红色 = 高频（6 场以上），橙色 = 常考（4〜5 场），灰色 = 偶尔考。</div>
+    </div></details>
+  <div class="route bk-${b.id}">
   ${b.courses.map((c) => {
     const pts = POINTS.filter((p) => p.book === b.id && p.course === c.n);
     const done = pts.filter((p) => statusOf(p.id) === "mastered").length;
-    return `<div class="course">
-      <div class="course-h"><b>第${c.n}コース ${esc(c.title)}</b><span class="muted small">p.${c.p} · ${done}/${pts.length}</span></div>
+    const cls = done === pts.length ? "done" : c.n === nowCourse ? "now" : "";
+    return `<div class="course ${cls}">
+      <div class="stop"><svg viewBox="0 0 37 37"><circle class="bg" cx="18.5" cy="18.5" r="16" stroke-width="2"/>${done && done < pts.length ? `<circle class="fg" cx="18.5" cy="18.5" r="16" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="${SC}" stroke-dashoffset="${SC * (1 - done / pts.length)}"/>` : ""}</svg><span>${done === pts.length ? "✓" : c.n}</span></div>
+      <div class="course-h"><b>第${c.n}コース ${esc(c.title)}</b>${cls === "now" ? `<span class="now-tag">学到这里</span>` : ""}<span class="muted small" title="教材第 ${c.p} 页起；${pts.length} 个ポイント里已掌握 ${done} 个">教材 p.${c.p} · 已掌握 ${done}/${pts.length}</span></div>
       <div class="plist">${pts.map((pt) => {
         const imp = impOf(pt), r = S.points[pt.id]?.review;
         return `<a class="pitem" href="#/p/${pt.id}" data-pid="${pt.id}"><i class="st ${statusOf(pt.id)}"></i>
           <span class="t">${"❶❷❸❹❺❻❼❽"[pt.n - 1]} ${esc(pt.title)}</span>
           ${r && r.due <= today() ? `<span class="due-tag">复习</span>` : ""}
-          ${imp ? `<span class="imp ${imp}">${imp}</span>` : ""}</a>`;
+          ${imp ? `<span class="imp ${imp}" title="教材重要度 ${imp}（A 最重要 → C 一般）">${imp}</span>` : ""}</a>`;
       }).join("")}</div></div>`;
-  }).join("")}`;
+  }).join("")}</div>`;
   pointInfo().then(({ m, nExams }) => {
     document.querySelectorAll(".pitem[data-pid]").forEach((a) => {
       const h = heat(m.get(a.dataset.pid), nExams);
@@ -223,13 +267,13 @@ async function viewPoint(id, opts = {}) {
       <div class="seg" id="stSeg">${[["new", "未学"], ["learning", "学习中"], ["mastered", "已掌握"]].map(([k, v]) => `<button data-st="${k}" class="${p.status === k ? "on " + k : ""}">${v}</button>`).join("")}</div>
     </div>
   </div>
-  ${isDue || opts.review ? `<div class="review-bar"><div class="row"><b>🔁 复习这一节</b><span class="small muted">先在右边点「复习提问」让 AI 考你，答完后给自己打分：</span><span class="spacer"></span>
-    <button class="btn sm" data-rate="forgot">😵 忘了</button><button class="btn sm" data-rate="vague">🤔 模糊</button><button class="btn sm primary" data-rate="good">😎 记得</button></div></div>` : ""}
+  ${isDue || opts.review ? `<div class="review-bar"><div class="row"><b>复习这一节</b><span class="small muted">先在右边点「复习提问」让 AI 考你，答完后给自己打分：</span><span class="spacer"></span>
+    <button class="btn sm" data-rate="forgot">忘了</button><button class="btn sm" data-rate="vague">模糊</button><button class="btn sm primary" data-rate="good">记得</button></div></div>` : ""}
   <div class="steps"><span>① 听原文</span><span>② 读讲义</span><span>③ 问 AI · 做题 · 讲给 AI 听</span><span>④ 标记掌握</span></div>
   <div class="grid2">
     <div>
       <div class="card">
-        <div class="tabs"><button data-tab="audio" class="on">🎧 原文朗读</button><button data-tab="explain">📖 中文讲义</button><button data-tab="cards">🃏 闪卡</button><button data-tab="notes">✏️ 我的笔记</button></div>
+        <div class="tabs"><button data-tab="audio" class="on">原文朗读</button><button data-tab="explain">中文讲义</button><button data-tab="cards">闪卡</button><button data-tab="notes">我的笔记</button></div>
         <div id="tab-audio"><div class="empty">加载中…</div></div>
         <div id="tab-explain" hidden></div>
         <div id="tab-cards" hidden></div>
@@ -238,8 +282,9 @@ async function viewPoint(id, opts = {}) {
           <p class="small muted">自动保存。</p>
         </div>
       </div>
+      <div class="card" id="numBox" hidden></div>
       <div class="card">
-        <div class="row"><h2 style="margin:0">📝 本节真题</h2><span class="spacer"></span>${ENV.ai ? `<button class="btn sm" id="wrongQ">做错了？让 AI 讲</button>` : ""}</div>
+        <div class="row"><h2 style="margin:0">本节真题</h2><span class="spacer"></span>${ENV.ai ? `<button class="btn sm" id="wrongQ">做错了？让 AI 讲</button>` : ""}</div>
         <div id="kkBox"><div class="empty">加载题库…</div></div>
         <details style="margin-top:10px"><summary class="small muted">外部网站（宅建試験ドットコム）</summary>
           ${pt.dojo ? `<p class="small" style="margin:8px 0">本节对应「${pt.dojo.n}. ${esc(pt.dojo.name)}」分野。跳过去后点书签栏的 <b>📌 宅建</b> 直接开始；做完再点一次，一問一答的对错会自动记回来。${dojoSummary(pt)}</p>` : ""}
@@ -247,8 +292,8 @@ async function viewPoint(id, opts = {}) {
             <button class="btn sm" data-dojo="marubatu">一問一答（○×）↗</button>
             <button class="btn sm" data-dojo="kakomon">过去问（四选一）↗</button>
             <span class="small muted">手动记：</span>
-            <span class="tally"><button class="btn sm" data-tally="ok" title="记一次对">✅ 对 <b>${p.quiz?.ok || 0}</b></button><button class="btn sm" data-dec="ok" title="点错了，减一">−</button></span>
-            <span class="tally"><button class="btn sm" data-tally="ng" title="记一次错">❌ 错 <b>${p.quiz?.ng || 0}</b></button><button class="btn sm" data-dec="ng" title="点错了，减一">−</button></span>
+            <span class="tally"><button class="btn sm" data-tally="ok" title="记一次对">对 <b>${p.quiz?.ok || 0}</b></button><button class="btn sm" data-dec="ok" title="点错了，减一">−</button></span>
+            <span class="tally"><button class="btn sm" data-tally="ng" title="记一次错">错 <b>${p.quiz?.ng || 0}</b></button><button class="btn sm" data-dec="ng" title="点错了，减一">−</button></span>
           </div>
         </details>
       </div>
@@ -258,7 +303,7 @@ async function viewPoint(id, opts = {}) {
       </div>
     </div>
     <div class="side"><div class="card chat">
-      <div class="row" style="margin-bottom:8px"><h2 style="margin:0">💬 AI 老师</h2><span class="spacer"></span><button class="btn sm" id="clearChat">清空</button></div>
+      <div class="row" style="margin-bottom:8px"><h2 style="margin:0">AI 老师</h2><span class="spacer"></span><button class="btn sm" id="clearChat">清空</button></div>
       <div class="quick" ${ENV.ai ? "" : "hidden"}>
         <button class="btn sm" data-q="again">换个例子再讲</button>
         <button class="btn sm" data-q="quiz">出 3 道题</button>
@@ -270,7 +315,7 @@ async function viewPoint(id, opts = {}) {
       ${ENV.ai ? `<div class="composer">
         <textarea id="input" rows="2" placeholder="哪里不懂？直接问。（Enter 发送，Shift+Enter 换行）"></textarea>
         <button class="btn primary" id="send">发送</button>
-      </div>` : `<div class="no-ai-note">📵 这台设备不连接 AI。上面是在电脑上问过的对话记录；要问 AI，请到电脑上打开这一节。<br>不懂的地方可以先 <a href="#/stuck">记进卡点本</a>。</div>`}
+      </div>` : `<div class="no-ai-note">这台设备不连接 AI。上面是在电脑上问过的对话记录；要问 AI，请到电脑上打开这一节。<br>不懂的地方可以先 <a href="#/stuck">记进卡点本</a>。</div>`}
     </div></div>
   </div>`;
 
@@ -302,13 +347,21 @@ async function viewPoint(id, opts = {}) {
     $("#input").rows = 7; $("#input").focus();
   };
   fillPointCard(id, $("#kkBox"));
+  pointNumbers(id).then((rows) => {
+    const box = $("#numBox"); if (!box || !rows.length || cur?.id !== id) return;
+    box.hidden = false;
+    box.innerHTML = `<div class="row"><h2 style="margin:0">本节数字</h2><span class="spacer"></span><a class="small" href="#/nums/${pt.book}">整科速记表 →</a></div>
+      <div class="nums">${rows.map((r) => `<div class="num-row"><div class="num-item">${esc(r.item)}${r.cond ? `<div class="small muted">${esc(r.cond)}</div>` : ""}</div>
+        <div class="num-val">${esc(r.value)}</div><div class="num-meta small">${r.jp ? `<span class="muted">${esc(r.jp)}</span>` : ""}${r.trap ? `<div class="num-trap">${esc(r.trap)}</div>` : ""}</div></div>`).join("")}</div>`;
+  }).catch(() => {});
   $("#notes").oninput =(e) => { P(id).notes = e.target.value; save(); };
   $("#clearChat").onclick = () => { if (confirm("清空这一节的对话？")) { P(id).chat = []; save(); renderMsgs(); } };
   if (ENV.ai) {
     document.querySelectorAll("[data-q]").forEach((b) => b.onclick = () => send(QUICK[b.dataset.q]));
     $("#send").onclick = () => send($("#input").value);
     $("#input").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send($("#input").value); } };
-    if (opts.ask) { $("#input").value = opts.ask; $("#input").focus(); }
+    if (opts.ask?.send) send(opts.ask.text);
+    else if (opts.ask) { $("#input").value = opts.ask; $("#input").focus(); }
   }
 
   renderExplain();
@@ -370,7 +423,7 @@ function bmSetupHtml() {
     <li>按 <kbd>⌘</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>（Windows 是 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>）显示书签栏</li>
     <li>把这个按钮<b>拖到书签栏</b>上 → <a class="bm-link" href="${esc(bookmarklet())}" onclick="alert('不要点它，把它拖到书签栏上。');return false">📌 宅建</a></li>
     <li>跳过去：课程页点「一問一答」或「过去问」按钮 → 到那边点 <b>📌 宅建</b>，自动选好这一节的分野开始出题（两种都可以）</li>
-    <li>记回来：<b>一問一答</b>做完一批，再点一次 <b>📌 宅建</b>，对错自动记回来；<b>过去问</b>的成绩存在对方服务器上，书签读不到，做完在课程页「真题练习」里手动点 ✅ / ❌</li>
+    <li>记回来：<b>一問一答</b>做完一批，再点一次 <b>📌 宅建</b>，对错自动记回来；<b>过去问</b>的成绩存在对方服务器上，书签读不到，做完在课程页「真题练习」里手动记「对 / 错」</li>
   </ol>`;
 }
 // 新设备（这个浏览器还没确认装过书签）：弹窗提示先装书签。手机/平板拖不了书签，不弹。
@@ -381,7 +434,7 @@ function maybeAskBookmark() {
   const bg = document.createElement("div");
   bg.className = "modal-bg";
   bg.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="bmTitle">
-    <h2 id="bmTitle" style="margin-top:0">📌 新设备：先装做题书签</h2>
+    <h2 id="bmTitle" style="margin-top:0">新设备：先装做题书签</h2>
     <p class="small muted" style="margin-top:0">做真题要靠这个书签：跳到宅建試験ドットコム后自动选好分野，做完一批还能把一問一答的对错记回来。每个浏览器装一次就行。</p>
     ${bmSetupHtml()}
     <div class="row" style="justify-content:flex-end;margin-top:12px">
@@ -452,9 +505,10 @@ function renderExplain() {
   if (!cur.gen && !p.explain) { box.innerHTML = `<div class="empty">讲义加载中…</div>`; return; }
   const text = p.explain || cur.gen?.explain;
   box.innerHTML = text
-    ? `<div class="md">${md(text)}</div>${ENV.ai ? `<div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn sm" id="regen">重新生成讲义</button></div>` : ""}`
+    ? `<div class="md" id="explainMd">${md(text)}</div>${ENV.ai ? `<div class="row" style="margin-top:12px"><span class="spacer"></span><button class="btn sm" id="regen">重新生成讲义</button></div>` : ""}`
     : `<div class="empty"><p>${cur.gen?.error ? `讲义加载失败：${esc(cur.gen.error)}` : "这一节的中文讲义还没生成。"}</p>${ENV.ai ? `<button class="btn primary" id="regen">生成中文讲义</button>` : ""}</div>`;
   if ($("#regen")) $("#regen").onclick = genExplain;
+  if ($("#explainMd")) linkLaws($("#explainMd"));
 }
 async function genExplain() {
   if (cur.streaming) return;
@@ -489,7 +543,7 @@ function renderCards() {
   const d = cur.deck, known = cards.filter((_, i) => csPeek(i).known).length;
   if (d.i >= d.order.length) {
     const weak = cards.length - known;
-    box.innerHTML = `<div class="empty"><p style="font-size:28px;margin:0">🎉</p><p>这一轮 ${d.order.length} 张练完了。<br>已记住 <b>${known}</b> / ${cards.length} 张。</p>
+    box.innerHTML = `<div class="empty"><p style="font-size:28px;margin:0"></p><p>这一轮 ${d.order.length} 张练完了。<br>已记住 <b>${known}</b> / ${cards.length} 张。</p>
       <div class="row" style="justify-content:center">${weak ? `<button class="btn primary" data-deck="weak">再练没记住的 ${weak} 张</button>` : ""}
       <button class="btn" data-deck="all">全部重来</button><button class="btn" id="cardList">查看全部卡片</button></div></div>`;
   } else {
@@ -507,7 +561,7 @@ function renderCards() {
       </div>
       <div class="row" style="justify-content:center;margin-top:12px">
         ${d.flipped
-          ? `<button class="btn" data-grade="ng">❌ 没记住 <span class="small muted">1</span></button><button class="btn primary" data-grade="ok">✅ 记住了 <span class="small">2</span></button>`
+          ? `<button class="btn" data-grade="ng">没记住 <span class="small muted">1</span></button><button class="btn primary" data-grade="ok">记住了 <span class="small">2</span></button>`
           : `<button class="btn primary" id="flipBtn">翻面 <span class="small">空格</span></button>`}
       </div>
       <div class="row small" style="margin-top:14px"><span class="spacer"></span>
@@ -537,18 +591,19 @@ function flipCard() { cur.deck.flipped = !cur.deck.flipped; renderCards(); }
 function gradeCard(g) {
   const d = cur.deck, c = cs(d.order[d.i]);
   c[g] = (c[g] || 0) + 1; c.known = g === "ok";
+  if (g === "ok" || g === "ng") (S.cardLog ||= []).push([cur.id, d.order[d.i], g === "ok" ? 1 : 0, Math.floor(Date.now() / 1000)]);
   touchDay(); save();
   d.i++; d.flipped = false; renderCards();
 }
 function updateCardTab() {
   const cards = deckCards(), b = document.querySelector('[data-tab="cards"]');
-  if (b) b.innerHTML = `🃏 闪卡${cards.length ? ` <span class="small">${cards.filter((_, i) => csPeek(i).known).length}/${cards.length}</span>` : ""}`;
+  if (b) b.innerHTML = `闪卡${cards.length ? ` <span class="small">${cards.filter((_, i) => csPeek(i).known).length}/${cards.length}</span>` : ""}`;
 }
 function renderCardList() {
   const cards = deckCards(), box = $("#tab-cards");
   box.innerHTML = `<div class="row" style="margin-bottom:10px"><b>全部 ${cards.length} 张</b><span class="spacer"></span>
       <button class="btn sm" id="backDeck">← 回去练习</button>${ENV.ai ? `<button class="btn sm" id="genCards">重新生成</button>` : ""}</div>
-    <div class="card-list">${cards.map((c, i) => { const st = csPeek(i); return `<details class="cl ${st.known ? "known" : ""}"><summary><span class="muted small">${i + 1}.</span> ${esc(c.q)} ${st.known ? "✅" : st.ng ? "❌" : ""}</summary><div class="md">${md(c.a)}</div></details>`; }).join("")}</div>`;
+    <div class="card-list">${cards.map((c, i) => { const st = csPeek(i); return `<details class="cl ${st.known ? "known" : ""}"><summary><span class="muted small">${i + 1}.</span> ${esc(c.q)} ${st.known ? '<i class="rk ok">○</i>' : st.ng ? '<i class="rk ng">×</i>' : ""}</summary><div class="md">${md(c.a)}</div></details>`; }).join("")}</div>`;
   $("#backDeck").onclick = renderCards;
   if ($("#genCards")) $("#genCards").onclick = () => { if (confirm("重新生成会替换现在的闪卡（记忆记录也会清零），确定？")) genCards(); };
 }
@@ -587,7 +642,7 @@ function renderMsgs() {
   const chat = P(cur.id).chat;
   $("#msgs").innerHTML = chat.length
     ? chat.map((m, i) => `<div class="msg ${m.role}"><div class="bubble ${m.role === "assistant" ? "md" : ""}">${m.role === "assistant" ? md(m.content) : esc(m.content).replace(/\n/g, "<br>")}</div>
-      ${m.role === "assistant" ? `<div class="acts"><button data-stuck="${i}">📌 记为卡点</button></div>` : ""}</div>`).join("")
+      ${m.role === "assistant" ? `<div class="acts"><button data-stuck="${i}">记为卡点</button></div>` : ""}</div>`).join("")
     : `<div class="empty small">还没有对话。<br>不懂的地方直接问，或者点上面的按钮。</div>`;
   $("#msgs").querySelectorAll("[data-stuck]").forEach((b) => b.onclick = () => {
     const i = Number(b.dataset.stuck);
@@ -634,7 +689,7 @@ async function streamAI(body, onText) {
       text += dec.decode(value, { stream: true });
       if (!pending) { pending = true; requestAnimationFrame(() => { pending = false; onText(text); }); }
     }
-  } catch (e) { text += `\n\n⚠️ 网络错误：${e.message}`; }
+  } catch (e) { text += `\n\n网络错误：${e.message}`; }
   onText(text);
   if (ENV.ai) refreshAI(); // 每次问完都顺便更新右上角状态（出错会变色）
   return text;
@@ -682,8 +737,12 @@ function viewReview() {
   <div class="card">${due.length ? `
     <div class="row" style="margin-bottom:10px"><b>今天要复习 ${due.length} 个</b><span class="spacer"></span><a class="btn primary" href="#/p/${due[0].id}/review">开始复习 →</a></div>
     <div class="plist">${due.map((pt) => `<a class="pitem" href="#/p/${pt.id}/review"><i class="st ${statusOf(pt.id)}"></i><span class="t">${esc(pt.courseTitle)} › ${esc(pt.title)}</span></a>`).join("")}</div>`
-    : `<div class="empty">今天没有要复习的。🎉</div>`}</div>
+    : `<div class="empty">今天没有要复习的。</div>`}</div>
+  ${(() => { const w = dueWrongKeys().length, all = wrongKeys().length;
+    return all ? `<div class="card"><div class="row"><h2 style="margin:0">到期的错题</h2><span class="spacer"></span>${w ? `<button class="btn primary" id="doDueWrong">做 ${w} 个到期错题 →</button>` : `<span class="small muted">今天没有到期的</span>`}</div>
+      <p class="small muted" style="margin:6px 0 0">错题本共 ${all} 个，按 1 → 3 → 7 天间隔再出现。<a href="#/kk/wrong">看错题本</a></p></div>` : ""; })()}
   ${upcoming.length ? `<div class="card"><h2>接下来</h2>${upcoming.map((pt) => `<div class="row small" style="padding:3px 0"><span class="muted" style="width:96px">${S.points[pt.id].review.due}</span><a href="#/p/${pt.id}">${esc(pt.courseTitle)} › ${esc(pt.title)}</a></div>`).join("")}</div>` : ""}`;
+  if ($("#doDueWrong")) $("#doDueWrong").onclick = startDueWrong;
 }
 
 // ---------------- 卡点本 ----------------
@@ -718,7 +777,7 @@ function viewStuck() {
   </div>
   <div class="card">
     <div class="stuck-filter">
-      <input id="sfQ" class="btn" type="search" placeholder="🔍 关键词（卡点、我的提问、AI 回答里都会搜）" value="${esc(SF.q)}">
+      <input id="sfQ" class="btn" type="search" placeholder="关键词（卡点、我的提问、AI 回答里都会搜）" value="${esc(SF.q)}">
       <div class="seg" id="sfSt">${[["open", `未解决 ${nOpen}`], ["done", `已解决 ${all.length - nOpen}`], ["all", `全部 ${all.length}`]].map(([k, v]) => `<button data-st="${k}" class="${SF.st === k ? "on learning" : ""}">${v}</button>`).join("")}</div>
       <select id="sfBook" class="btn"><option value="">全部科目</option>${books.map((b) => `<option value="${b.id}" ${SF.book === b.id ? "selected" : ""}>${esc(b.title)}</option>`).join("")}</select>
       <select id="sfCourse" class="btn" ${courseOpts.length ? "" : "disabled"}><option value="">全部コース</option>${courseOpts.map((c) => `<option value="${c.n}" ${String(SF.course) === String(c.n) ? "selected" : ""}>第${c.n}コース ${esc(c.title)}</option>`).join("")}</select>
@@ -793,13 +852,98 @@ function renderStuckList() {
         return `<div class="stuck-item ${s.done ? "done" : ""}">
         <input type="checkbox" data-done="${s.id}" ${s.done ? "checked" : ""} title="已解决">
         <div style="flex:1;min-width:0"><div class="txt">${mark(s.text)}</div><div class="small muted">${s.created} · <a href="#/p/${s.pointId}">${esc(pt?.title)}</a></div>
-          ${qa ? `<details class="stuck-qa" ${inQA ? "open" : ""}><summary class="small">💬 当初的问答${inQA ? "（关键词在这里）" : ""}</summary>
+          ${qa ? `<details class="stuck-qa" ${inQA ? "open" : ""}><summary class="small">当初的问答${inQA ? "（关键词在这里）" : ""}</summary>
             ${qa.q ? `<div class="stuck-q"><b>我问：</b>${mark(qa.q).replace(/\n/g, "<br>")}</div>` : ""}
             <div class="stuck-a md">${md(qa.a)}</div></details>` : ""}</div>
         <button class="btn sm" data-ask="${s.id}">去问 AI</button><button class="btn sm" data-del="${s.id}">删除</button>
       </div>`; }).join("")}</div>`).join("");
 }
 let pendingAsk = null;
+
+// ---------------- 做题页侧栏：讲义 + AI 老师 ----------------
+// 开着的话，换下一题时保持打开，自动切到新题的相关ポイント；对话存在那个ポイント的聊天记录里（课程页也能看到）
+const SIDE = { open: false, tab: "chat", pid: null, pts: [], busy: false, gen: {} };
+try { SIDE.open = localStorage.getItem("takken.sideOpen") === "1"; } catch {}
+function mountSide(el, pts) {
+  SIDE.pts = pts.filter((p) => POINT_BY_ID[p]);
+  if (!SIDE.pts.includes(SIDE.pid)) SIDE.pid = SIDE.pts[0] || null;
+  renderSide();
+}
+function openSide(pts, tab) {
+  SIDE.open = true; SIDE.tab = tab || SIDE.tab;
+  try { localStorage.setItem("takken.sideOpen", "1"); } catch {}
+  if (pts) mountSide(null, pts); else renderSide();
+}
+function renderSide() {
+  const el = $("#kkSide"); if (!el) return;
+  el.closest(".kk-split")?.classList.toggle("open", SIDE.open && !!SIDE.pid);
+  if (!SIDE.open || !SIDE.pid) { el.innerHTML = ""; return; }
+  const pt = POINT_BY_ID[SIDE.pid];
+  el.innerHTML = `<div class="card side-card">
+    <div class="row side-top">
+      ${SIDE.pts.length > 1 ? `<select class="btn sm side-pt" id="sidePt">${SIDE.pts.map((id) => `<option value="${id}" ${id === SIDE.pid ? "selected" : ""}>${esc(POINT_BY_ID[id].courseTitle)} › ${esc(POINT_BY_ID[id].title)}</option>`).join("")}</select>`
+        : `<b class="side-pt-t">${esc(pt.courseTitle)} › ${esc(pt.title)}</b>`}
+      <span class="spacer"></span><a class="small" href="#/p/${pt.id}" title="打开这一节的课程页">课程页 ↗</a>
+      <button class="icon-btn" id="sideClose" title="收起侧栏" aria-label="收起侧栏">✕</button>
+    </div>
+    <div class="tabs side-tabs"><button data-st="chat" class="${SIDE.tab === "chat" ? "on" : ""}">AI 老师</button><button data-st="explain" class="${SIDE.tab === "explain" ? "on" : ""}">讲义</button></div>
+    <div id="sideBody" class="side-body"></div>
+  </div>`;
+  $("#sideClose").onclick = () => { SIDE.open = false; try { localStorage.setItem("takken.sideOpen", "0"); } catch {} renderSide(); };
+  if ($("#sidePt")) $("#sidePt").onchange = (e) => { SIDE.pid = e.target.value; renderSide(); };
+  el.querySelectorAll("[data-st]").forEach((b) => b.onclick = () => { SIDE.tab = b.dataset.st; renderSide(); });
+  SIDE.tab === "chat" ? renderSideChat() : renderSideExplain();
+}
+function renderSideExplain() {
+  const id = SIDE.pid, box = $("#sideBody");
+  const show = (text) => { if (SIDE.pid !== id || SIDE.tab !== "explain" || !$("#sideBody")) return;
+    $("#sideBody").innerHTML = text ? `<div class="md" id="sideMd">${md(text)}</div>` : `<div class="empty small">这一节的讲义还没生成。</div>`;
+    if ($("#sideMd")) linkLaws($("#sideMd")); };
+  const own = P(id).explain;
+  if (own || SIDE.gen[id] !== undefined) return show(own || SIDE.gen[id]);
+  box.innerHTML = `<div class="empty small">讲义加载中…</div>`;
+  loadGen(id).then((g) => { SIDE.gen[id] = g.explain || ""; show(SIDE.gen[id]); }).catch((e) => { box.innerHTML = `<div class="empty small">讲义加载失败：${esc(e.message)}</div>`; });
+}
+function renderSideChat() {
+  const id = SIDE.pid, chat = P(id).chat || [];
+  $("#sideBody").innerHTML = `<div class="msgs side-msgs" id="sideMsgs">${chat.length
+      ? chat.map((m) => `<div class="msg ${m.role}"><div class="bubble ${m.role === "assistant" ? "md" : ""}">${m.role === "assistant" ? md(m.content) : userMsgHtml(m.content)}</div></div>`).join("")
+      : `<div class="empty small">做错了、没把握的题，点「问 AI 老师」会把题目自动带过来。<br>对话会存进这一节，课程页也能看到。</div>`}</div>
+    ${ENV.ai ? `<div class="composer"><textarea id="sideIn" rows="2" placeholder="接着问…（Enter 发送，Shift+Enter 换行）"></textarea><button class="btn primary" id="sideSend" ${SIDE.busy ? "disabled" : ""}>发送</button></div>`
+      : `<div class="no-ai-note">这台设备不连接 AI，只能看之前的对话。</div>`}`;
+  const m = $("#sideMsgs"); m.scrollTop = 1e9;
+  m.querySelectorAll(".md").forEach((x) => linkLaws(x));
+  if (ENV.ai) {
+    $("#sideSend").onclick = () => sideSend($("#sideIn").value);
+    $("#sideIn").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); sideSend($("#sideIn").value); } };
+  }
+}
+// 自动带过去的题目很长：只显示第一行，点开看全文
+function userMsgHtml(t) {
+  const br = (x) => esc(x).replace(/\n/g, "<br>");
+  if (t.length < 160 || !t.includes("\n")) return br(t);
+  const i = t.indexOf("\n");
+  return `<details class="q-fold"><summary>${esc(t.slice(0, i))}<span class="small">（题目已附上，点开看）</span></summary>${br(t.slice(i + 1))}</details>`;
+}
+async function sideSend(text) {
+  text = (text || "").trim();
+  if (!text || SIDE.busy || !SIDE.pid || !ENV.ai) return;
+  const id = SIDE.pid, p = P(id);
+  p.chat ||= [];
+  SIDE.tab = "chat"; SIDE.busy = true;
+  p.chat.push({ role: "user", content: text });
+  renderSide();
+  const m = $("#sideMsgs"); m.querySelector(".empty")?.remove();
+  const wrap = document.createElement("div"); wrap.className = "msg assistant"; wrap.innerHTML = `<div class="bubble md typing"></div>`;
+  m.appendChild(wrap); m.scrollTop = 1e9;
+  const answer = await streamAI({ pointId: id, history: p.chat, notes: p.notes }, (t) => {
+    const b = $("#sideMsgs")?.querySelector(".msg.assistant:last-child .bubble.typing"); if (!b) return;
+    b.innerHTML = md(t); const mm = $("#sideMsgs"); if (mm.scrollHeight - mm.scrollTop - mm.clientHeight < 200) mm.scrollTop = 1e9;
+  });
+  p.chat.push({ role: "assistant", content: answer });
+  SIDE.busy = false; touchDay(); save();
+  if (SIDE.pid === id && SIDE.tab === "chat") renderSide();
+}
 
 // ---------------- 路由 ----------------
 function route() {
@@ -810,6 +954,8 @@ function route() {
   if (!booted && r !== "sync") return viewSync();
   if (r === "kk") return id === "run" ? viewRun() : id === "wrong" ? viewWrong() : id === "mock" ? viewMock() : BOOK_BY_ID[id] ? viewBook(id) : viewKK();
   if (r === "toc") return viewToc(id);
+  if (r === "nums") return viewNums(id);
+  if (r === "lawchange") return lawChangeQs().catch(() => []).then(viewLawChange);
   if (r === "review") return viewReview();
   if (r === "stuck") return viewStuck();
   if (r === "sync") return viewSync();
@@ -835,9 +981,9 @@ function viewSync() {
   const mastered = pts.filter((p) => p.status === "mastered").length;
   const cards = pts.reduce((n, p) => n + Object.values(p.cardStat || {}).filter((x) => x.known).length, 0);
   const chats = pts.reduce((n, p) => n + (p.chat?.length || 0), 0);
-  $("#app").innerHTML = `<h1>☁️ 同步</h1>
+  $("#app").innerHTML = `<h1>同步</h1>
   <div class="card kv">
-    <div><span>当前设备</span><b>${ENV.local ? "💻 电脑 · 本地版（AI 可用）" : ENV.ai ? "💻 电脑 · 线上版（AI 借本机服务）" : "📱 其他设备（无 AI）"}</b></div>
+    <div><span>当前设备</span><b>${ENV.local ? "电脑 · 本地版（AI 可用）" : ENV.ai ? "电脑 · 线上版（AI 借本机服务）" : "其他设备（无 AI）"}</b></div>
     <div><span>同步</span><b>${esc(syncTip())}</b>${c ? `<button class="btn sm" id="syncNow">立即同步</button>` : ""}</div>
     <div><span>学习记录</span><b>${booted ? `学过 ${learned} 节 · 掌握 ${mastered} 节 · 闪卡记住 ${cards} 张 · 对话 ${chats} 条 · 学习 ${Object.keys(S.days).length} 天` : "—"}</b></div>
   </div>
@@ -850,8 +996,8 @@ function viewSync() {
     <div class="small" id="ghMsg" style="margin-top:6px"></div>
   </div>
   <div class="card">
-    <div class="row"><h2 style="margin:0">📌 定位书签</h2><span class="spacer"></span>
-      <span class="small ${bmInstalled() ? "" : "muted"}">${bmInstalled() ? "✅ 这台设备已装好" : "这台设备还没装"}</span></div>
+    <div class="row"><h2 style="margin:0">定位书签</h2><span class="spacer"></span>
+      <span class="small ${bmInstalled() ? "" : "muted"}">${bmInstalled() ? "这台设备已装好" : "这台设备还没装"}</span></div>
     ${isTouch() ? `<p class="small muted" style="margin:8px 0 0">手机 / 平板上拖不了书签，这一项请在电脑上装。</p>` : bmSetupHtml()}
     ${isTouch() ? "" : `<div class="row"><span class="spacer"></span>${bmInstalled()
       ? `<button class="btn sm" id="bmReset">书签丢了，重新装</button>`
@@ -868,11 +1014,11 @@ function viewSync() {
     $("#ghMsg").textContent = "连接中…";
     try {
       await testToken();
-      $("#ghMsg").textContent = "✅ 已连接，正在同步…";
+      $("#ghMsg").textContent = "已连接，正在同步…";
       await doSync();
       if (!ENV.local && !booted) return boot2();
       viewSync();
-    } catch (e) { setGhCfg(old); $("#ghMsg").textContent = `❌ ${e.message}`; }
+    } catch (e) { setGhCfg(old); $("#ghMsg").textContent = `${e.message}`; }
   };
   if ($("#ghOut")) $("#ghOut").onclick = () => { if (confirm("从这台设备删除令牌？（仓库里的记录不受影响）")) { setGhCfg(null); viewSync(); renderNav(); } };
   if ($("#bmMark")) $("#bmMark").onclick = () => { setBmInstalled(true); viewSync(); };
@@ -919,111 +1065,150 @@ function viewImport(raw) {
   const ok = fresh.filter((x) => x[1] === 1).length, ng = fresh.filter((x) => x[1] === 2).length, pass = fresh.length - ok - ng;
   const byCat = {};
   fresh.forEach(([, r, c]) => { const b = (byCat[c] ||= { ok: 0, ng: 0 }); if (r === 1) b.ok++; else if (r === 2) b.ng++; });
-  $("#app").innerHTML = `<h1>📥 一問一答成绩</h1>
+  $("#app").innerHTML = `<h1>一問一答成绩</h1>
   <div class="card">${fresh.length ? `
-    <p style="margin-top:0">新记下 <b>${fresh.length}</b> 题：✅ 对 <b>${ok}</b>　❌ 错 <b>${ng}</b>${pass ? `　跳过 ${pass}` : ""}${ok + ng ? `　正确率 <b>${Math.round((ok / (ok + ng)) * 100)}%</b>` : ""}</p>
+    <p style="margin-top:0">新记下 <b>${fresh.length}</b> 题：对 <b>${ok}</b>　错 <b>${ng}</b>${pass ? `　跳过 ${pass}` : ""}${ok + ng ? `　正确率 <b>${Math.round((ok / (ok + ng)) * 100)}%</b>` : ""}</p>
     ${Object.entries(byCat).map(([c, b]) => `<div class="hrow"><span class="hl">${c}. ${esc(DOJO_FIELDS[c] || "")}</span>
       <div class="hbar single">${b.ok + b.ng ? `<span style="display:flex;gap:2px;width:100%">${b.ok ? `<i class="ok" style="flex:${b.ok}"></i>` : ""}${b.ng ? `<i class="ng" style="flex:${b.ng}"></i>` : ""}</span>` : ""}</div>
       <span class="hv">${b.ok}/${b.ok + b.ng}</span></div>`).join("")}`
     : `<p style="margin:0">没有新的答题记录（${rows.length ? `这 ${rows.length} 条之前已经记过了` : "没有権利関係的一問一答记录"}）。</p>`}
   </div>
-  <p class="small muted">累计一問一答 ${dojoStats().n} 题 · 对 ${dojoStats().ok} 题。去 <a href="#/stats">📊 统计</a> 看全部。这个页面可以直接关掉。</p>`;
+  <p class="small muted">累计一問一答 ${dojoStats().n} 题 · 对 ${dojoStats().ok} 题。去 <a href="#/stats">统计</a> 看全部。这个页面可以直接关掉。</p>`;
 }
 
 // ---------------- 统计 ----------------
+// 统计：先看四科全貌，再按科目看各コース
+let statsBook = (() => { try { return localStorage.getItem("takken.statsBook") || "kenri"; } catch { return "kenri"; } })();
 function viewStats() {
   const pts = (pt) => S.points[pt.id] || {};
   const all = POINTS.map((pt) => ({ pt, p: pts(pt) }));
   const mastered = all.filter((x) => x.p.status === "mastered").length;
   const learning = all.filter((x) => x.p.status === "learning").length;
-  const sum = (f) => all.reduce((n, x) => n + f(x.p), 0);
-  const known = sum((p) => Object.values(p.cardStat || {}).filter((c) => c.known).length);
+  const sum = (f, xs = all) => xs.reduce((n, x) => n + f(x.p), 0);
+  const knownOf = (p) => Object.values(p.cardStat || {}).filter((c) => c.known).length;
+  const known = sum(knownOf);
   const tries = sum((p) => Object.values(p.cardStat || {}).reduce((n, c) => n + (c.ok || 0) + (c.ng || 0), 0));
   const ds = dojoStats();
   const kt = kkTotals();
   const qOk = sum((p) => p.quiz?.ok || 0) + ds.ok + kt.ok, qNg = sum((p) => p.quiz?.ng || 0) + ds.ng + (kt.n - kt.ok);
-  // 真题按宅建試験ドットコム的分野统计：一問一答（书签导入）+ 过去问（手动记）
-  const fields = Object.entries(DOJO_FIELDS).map(([n, name]) => {
-    n = Number(n);
-    const d = dojoStats((c) => c === n);
-    const man = all.filter((x) => x.pt.dojo?.n === n).reduce((a, x) => ({ ok: a.ok + (x.p.quiz?.ok || 0), ng: a.ng + (x.p.quiz?.ng || 0) }), { ok: 0, ng: 0 });
-    return { n, name, ok: d.ok + man.ok, ng: d.ng + man.ng };
-  });
-  const fMax = Math.max(1, ...fields.map((x) => x.ok + x.ng));
   const asks = sum((p) => (p.chat || []).filter((m) => m.role === "user").length);
   const stuckOpen = S.stuck.filter((x) => !x.done).length, stuckDone = S.stuck.length - stuckOpen;
   const dayKeys = Object.keys(S.days).sort();
   const first = dayKeys[0];
-
-  // 最近 30 天每天的学习动作数
   const days = Array.from({ length: 30 }, (_, i) => { const d = addDays(i - 29); return { d, n: S.days[d] || 0 }; });
   const dMax = Math.max(1, ...days.map((x) => x.n));
-  // 连续学习天数
-  let streak = 0; for (let i = S.days[today()] ? 0 : 1; S.days[addDays(-i)]; i++) streak++; // 今天还没学也不算断
-  // 未来 14 天复习安排
+  let streak = 0; for (let i = S.days[today()] ? 0 : 1; S.days[addDays(-i)]; i++) streak++;
   const due = Array.from({ length: 14 }, (_, i) => { const d = addDays(i); return { d, n: all.filter((x) => x.p.review && (i === 0 ? x.p.review.due <= d : x.p.review.due === d)).length }; });
   const dueMax = Math.max(1, ...due.map((x) => x.n));
-  const courses = BOOKS.flatMap((b) => b.courses.map((c) => ({ b, c }))).map(({ b, c }) => {
-    const xs = all.filter((x) => x.pt.book === b.id && x.pt.course === c.n);
-    return { c, total: xs.length,
-      m: xs.filter((x) => x.p.status === "mastered").length, l: xs.filter((x) => x.p.status === "learning").length,
-      known: xs.reduce((n, x) => n + Object.values(x.p.cardStat || {}).filter((k) => k.known).length, 0),
-      ok: xs.reduce((n, x) => n + (x.p.quiz?.ok || 0), 0), ng: xs.reduce((n, x) => n + (x.p.quiz?.ng || 0), 0) };
-  });
-  const kMax = Math.max(1, ...courses.map((x) => x.known));
-  const qMax = Math.max(1, ...courses.map((x) => x.ok + x.ng));
   const md2 = (d) => d.slice(5).replace("-", "/");
   const tile = (v, k, sub = "") => `<div class="stat"><div class="v">${v}${sub ? `<span class="muted small"> ${sub}</span>` : ""}</div><div class="k">${k}</div></div>`;
   const colChart = (data, max, label) => `<div class="cols">${data.map((x) =>
     `<div class="col" title="${x.d}：${label} ${x.n}"><div class="col-bar" style="height:${(x.n / max) * 100}%"></div>${x.n ? `<span class="col-v">${x.n}</span>` : ""}</div>`).join("")}</div>
     <div class="cols-x"><span>${md2(data[0].d)}</span><span>${md2(data[Math.floor(data.length / 2)].d)}</span><span>${md2(data.at(-1).d)}</span></div>`;
+  // 四科卡片
+  const bookCard = (b) => {
+    const xs = all.filter((x) => x.pt.book === b.id), total = xs.length;
+    const m = xs.filter((x) => x.p.status === "mastered").length, l = xs.filter((x) => x.p.status === "learning").length;
+    return `<a class="sb-card bk-${b.id}" href="javascript:void 0" data-sb="${b.id}">
+      <div class="row"><b class="sb-t">${esc(b.title)}</b><span class="spacer"></span><span class="small sb-q">本试 ${b.examQ} 题</span></div>
+      ${total ? `<div class="sb-big">${Math.round((m / total) * 100)}<small>%</small></div><div class="small sb-sub">已掌握 ${m} / ${total} ポイント${l ? ` · 学习中 ${l}` : ""}</div>
+        <div class="sb-bar"><i style="width:${(m / total) * 100}%"></i><i class="l" style="width:${(l / total) * 100}%"></i></div>
+        <div class="sb-meta small"><span>闪卡记住 <b>${sum(knownOf, xs)}</b></span><span>过去问 <b data-acc="${b.id}">…</b></span></div>`
+      : `<div class="sb-empty">教材待导入</div><div class="small sb-sub">${esc(b.qNo)} · 音频到了就补上</div>
+        <div class="sb-meta small"><span>过去问 <b data-acc="${b.id}">…</b></span></div>`}
+    </a>`;
+  };
 
-  $("#app").innerHTML = `<h1>📊 统计</h1>
+  $("#app").innerHTML = `<h1>统计</h1>
   <p class="muted small" style="margin-top:0">${first ? `从 ${first} 开始，已经学了 ${dayKeys.length} 天${streak ? `，连续 ${streak} 天` : ""}。` : "还没有学习记录。"}</p>
   <div class="stats">
     ${tile(mastered, "已掌握的ポイント", `/ ${POINTS.length}`)}
-    ${tile(learning, "学习中")}
     ${tile(known, "闪卡已记住", `张 · 练 ${tries} 次`)}
-    ${tile(qOk + qNg ? Math.round((qOk / (qOk + qNg)) * 100) + "%" : "—", "真题正确率", qOk + qNg ? `${qOk}/${qOk + qNg} 题` : "")}
+    ${tile(qOk + qNg ? Math.round((qOk / (qOk + qNg)) * 100) + "%" : "—", "真题正确率", qOk + qNg ? `${qOk}/${qOk + qNg}` : "")}
     ${tile(asks, "问 AI 的次数")}
     ${tile(stuckOpen, "没解决的卡点", stuckDone ? `· 已解决 ${stuckDone}` : "")}
   </div>
-  <div class="card"><h2>最近 30 天学习量</h2><p class="small muted" style="margin-top:-6px">每天的学习动作数（打开新的一节、打分、做卡、问 AI、记录真题……）</p>${colChart(days, dMax, "学习动作")}</div>
-  <div class="card"><h2>各コース进度</h2>
-    <div class="legend" style="margin:-4px 0 10px"><span><i class="dot" style="background:var(--good)"></i>已掌握</span><span><i class="dot" style="background:var(--warn)"></i>学习中</span><span><i class="dot" style="background:var(--line)"></i>未学</span></div>
-    ${courses.map((x) => `<div class="hrow" title="${esc(x.c.title)}：已掌握 ${x.m}，学习中 ${x.l}，未学 ${x.total - x.m - x.l}">
-      <span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
-      <div class="hbar">${x.m ? `<i class="seg-m" style="flex:${x.m}"></i>` : ""}${x.l ? `<i class="seg-l" style="flex:${x.l}"></i>` : ""}${x.total - x.m - x.l ? `<i class="seg-n" style="flex:${x.total - x.m - x.l}"></i>` : ""}</div>
-      <span class="hv">${x.m}/${x.total}</span></div>`).join("")}
-  </div>
+  <h2 class="sec-h">四科一览 <span class="muted small">共 ${EXAM_TOTAL} 题 · ${esc(PASS_HINT)}</span></h2>
+  <div class="sb-grid">${BOOKS.map(bookCard).join("")}</div>
   <div class="grid-2">
-    <div class="card"><h2>闪卡记住张数</h2>
-      ${courses.map((x) => `<div class="hrow" title="${esc(x.c.title)}：记住 ${x.known} 张"><span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
-        <div class="hbar single">${x.known ? `<i style="width:${(x.known / kMax) * 100}%"></i>` : ""}</div><span class="hv">${x.known}</span></div>`).join("")}
-    </div>
-    <div class="card"><h2>真题对错（按分野）</h2>
-      <div class="legend" style="margin:-4px 0 10px"><span><i class="dot" style="background:var(--good)"></i>✅ 对</span><span><i class="dot" style="background:var(--bad)"></i>❌ 错</span><span class="small">一問一答自动导入 + 过去问手动记</span></div>
-      ${fields.map((x) => `<div class="hrow" title="${esc(x.name)}：对 ${x.ok}，错 ${x.ng}${x.ok + x.ng ? `，正确率 ${Math.round((x.ok / (x.ok + x.ng)) * 100)}%` : ""}"><span class="hl">${x.n}. ${esc(x.name)}</span>
-        <div class="hbar single">${x.ok + x.ng ? `<span style="display:flex;gap:2px;width:${((x.ok + x.ng) / fMax) * 100}%">${x.ok ? `<i class="ok" style="flex:${x.ok}"></i>` : ""}${x.ng ? `<i class="ng" style="flex:${x.ng}"></i>` : ""}</span>` : ""}</div>
-        <span class="hv">${x.ok + x.ng ? `${x.ok}/${x.ok + x.ng}` : "—"}</span></div>`).join("")}
-    </div>
+    <div class="card"><h2>最近 30 天学习量</h2><p class="small muted" style="margin-top:-6px">每天的学习动作数（新的一节、打分、闪卡、问 AI、做题……）</p>${colChart(days, dMax, "学习动作")}</div>
+    <div class="card"><h2>接下来 14 天要复习</h2><p class="small muted" style="margin-top:-6px">第一根包括今天和已经过期的。</p>${colChart(due, dueMax, "要复习")}</div>
   </div>
-  <div class="card"><h2>过去问正确率（按コース）</h2><p class="small muted" style="margin-top:-6px">站内过去问（四选一 + ○×）的累计作答。</p><div id="kkAcc"><div class="empty">加载…</div></div></div>
-  <div class="card"><h2>接下来 14 天要复习</h2><p class="small muted" style="margin-top:-6px">第一根包括今天和已经过期的。</p>${colChart(due, dueMax, "要复习")}</div>`;
+  ${trendCard()}
+  <h2 class="sec-h" id="sbHead">分科详情</h2>
+  <div class="book-tabs" id="sbTabs">${BOOKS.map((b) => `<a href="javascript:void 0" class="book-tab bk-${b.id}" data-sb="${b.id}"><b>${esc(b.title)}</b><span class="small">${b.courses.length ? `${b.courses.length} 个コース` : "待导入"}</span></a>`).join("")}</div>
+  <div id="sbBody"></div>`;
+  mountTrend();
+  bookAccuracy().then((acc) => {
+    for (const el of document.querySelectorAll("[data-acc]")) { const a = acc[el.dataset.acc];
+      el.textContent = !a?.total ? "待导入" : a.n ? `${Math.round((a.ok / a.n) * 100)}%` : "未做"; }
+  }).catch(() => {});
+  const show = (id, scroll) => {
+    statsBook = BOOK_BY_ID[id] ? id : "kenri";
+    try { localStorage.setItem("takken.statsBook", statsBook); } catch {}
+    document.querySelectorAll("#sbTabs .book-tab").forEach((t) => t.classList.toggle("on", t.dataset.sb === statsBook));
+    renderStatsBook(statsBook, all, knownOf);
+    if (scroll) $("#sbHead").scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  $("#app").onclick = (e) => { const t = e.target.closest("[data-sb]"); if (t) show(t.dataset.sb, !t.closest("#sbTabs")); };
+  show(statsBook);
+}
+function renderStatsBook(bookId, all, knownOf) {
+  const b = BOOK_BY_ID[bookId], box = $("#sbBody");
+  if (!b.courses.length) {
+    box.innerHTML = `<div class="card bk-${b.id} sb-wait"><h2>${esc(b.title)}（${esc(b.zh)}）</h2>
+      <p style="margin:0">这一科的教材音频还没到，コース和ポイント还没导入。导入后这里会显示各コース的掌握进度、闪卡和过去问正确率。</p>
+      <p class="small muted" style="margin:8px 0 0">本试 ${b.examQ} 题（${esc(b.qNo)}）${b.note ? ` · ${esc(b.note)}` : ""}</p></div>`;
+    return;
+  }
+  const courses = b.courses.map((c) => {
+    const xs = all.filter((x) => x.pt.book === b.id && x.pt.course === c.n);
+    return { c, total: xs.length, m: xs.filter((x) => x.p.status === "mastered").length, l: xs.filter((x) => x.p.status === "learning").length,
+      known: xs.reduce((n, x) => n + knownOf(x.p), 0) };
+  });
+  const kMax = Math.max(1, ...courses.map((x) => x.known));
+  let dojo = "";
+  if (b.id === "kenri") {
+    const fields = Object.entries(DOJO_FIELDS).map(([n, name]) => {
+      n = Number(n);
+      const d = dojoStats((c) => c === n);
+      const man = all.filter((x) => x.pt.dojo?.n === n).reduce((a, x) => ({ ok: a.ok + (x.p.quiz?.ok || 0), ng: a.ng + (x.p.quiz?.ng || 0) }), { ok: 0, ng: 0 });
+      return { n, name, ok: d.ok + man.ok, ng: d.ng + man.ng };
+    });
+    const fMax = Math.max(1, ...fields.map((x) => x.ok + x.ng));
+    dojo = `<div class="card"><h2>外部网站真题（宅建試験ドットコム分野）</h2>
+      <div class="legend" style="margin:-4px 0 10px"><span><i class="dot" style="background:var(--good)"></i>对</span><span><i class="dot" style="background:var(--bad)"></i>错</span><span class="small">一問一答书签导入 + 手动记</span></div>
+      ${fields.map((x) => `<div class="hrow" title="${esc(x.name)}：对 ${x.ok}，错 ${x.ng}"><span class="hl">${x.n}. ${esc(x.name)}</span>
+        <div class="hbar">${x.ok + x.ng ? `<span style="display:flex;gap:2px;width:${((x.ok + x.ng) / fMax) * 100}%">${x.ok ? `<i class="ok" style="flex:${x.ok}"></i>` : ""}${x.ng ? `<i class="ng" style="flex:${x.ng}"></i>` : ""}</span>` : ""}</div>
+        <span class="hv">${x.ok + x.ng ? `${x.ok}/${x.ok + x.ng}` : "—"}</span></div>`).join("")}</div>`;
+  }
+  box.innerHTML = `<div class="grid-2 ${dojo ? "quad" : "trio"} bk-${b.id}">
+    <div class="card"><h2>各コース掌握</h2>
+      <div class="legend" style="margin:-4px 0 10px"><span><i class="dot" style="background:var(--bk)"></i>已掌握</span><span><i class="dot" style="background:var(--warn)"></i>学习中</span><span><i class="dot" style="background:var(--line-2)"></i>未学</span></div>
+      ${courses.map((x) => `<div class="hrow" title="${esc(x.c.title)}：已掌握 ${x.m}，学习中 ${x.l}，未学 ${x.total - x.m - x.l}">
+        <span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
+        <div class="hbar">${x.m ? `<i class="seg-m" style="flex:${x.m}"></i>` : ""}${x.l ? `<i class="seg-l" style="flex:${x.l}"></i>` : ""}${x.total - x.m - x.l ? `<i class="seg-n" style="flex:${x.total - x.m - x.l}"></i>` : ""}</div>
+        <span class="hv">${x.m}/${x.total}</span></div>`).join("")}</div>
+    <div class="card"><h2>过去问正确率（按コース）</h2><p class="small muted" style="margin-top:-6px">站内过去问（四选一 + ○×）累计作答，70% 以上为绿色。</p><div id="kkAcc"><div class="empty">加载…</div></div></div>
+    <div class="card"><h2>闪卡记住张数</h2>
+      ${courses.map((x) => `<div class="hrow"><span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
+        <div class="hbar single">${x.known ? `<i style="width:${(x.known / kMax) * 100}%"></i>` : ""}</div><span class="hv">${x.known}</span></div>`).join("")}</div>
+    ${dojo}
+  </div>`;
   courseAccuracy().then((rows) => {
-    const box = $("#kkAcc"); if (!box) return;
-    box.innerHTML = rows.map((x) => { const r = x.n ? x.ok / x.n : 0;
+    const el = $("#kkAcc"); if (!el || statsBook !== bookId) return;
+    el.innerHTML = rows.filter((x) => x.b.id === bookId).map((x) => { const r = x.n ? x.ok / x.n : 0;
       return `<div class="hrow" title="${esc(x.c.title)}：${x.ok}/${x.n}"><span class="hl">${x.c.n}. ${esc(x.c.title)}</span>
-        <div class="hbar single">${x.n ? `<i class="${r >= 0.7 ? "ok" : "ng"}" style="width:${r * 100}%"></i>` : ""}</div>
+        <div class="hbar">${x.n ? `<i class="${r >= 0.7 ? "ok" : "ng"}" style="width:${r * 100}%;border-radius:4px"></i>` : ""}</div>
         <span class="hv">${x.n ? `${Math.round(r * 100)}%` : "—"}</span></div>`; }).join("");
-  }).catch(() => { const box = $("#kkAcc"); if (box) box.textContent = "题库读取失败"; });
+  }).catch(() => { const el = $("#kkAcc"); if (el) el.textContent = "题库读取失败"; });
 }
 
 // ---------------- 主题 ----------------
 function applyTheme() {
   const t = document.documentElement.dataset.theme
     || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-  $("#themeBtn").textContent = t === "dark" ? "☀️" : "🌙";
+  $("#themeBtn").innerHTML = t === "dark" ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>' : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
   $("#themeBtn").title = t === "dark" ? "切换到浅色" : "切换到深色";
   return t;
 }
@@ -1045,7 +1230,7 @@ async function boot2() {
   stampBaseline(S);
   if (ghCfg()) await doSync();
   route();
-  // 有了站内过去问，外部网站的书签不再主动弹窗（☁️ 同步页里还能装）
+  // 有了站内过去问，外部网站的书签不再主动弹窗（同步页里还能装）
 }
 (async () => {
   await detectEnv();
