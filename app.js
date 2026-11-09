@@ -1,8 +1,8 @@
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=0d93e61a7b";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=38852dda9e";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=0d93e61a7b";
-import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, dueWrongKeys, startDueWrong, startQ, lawChangeQs, predictScore, bookAccuracy, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=0d93e61a7b";
-import { initExtras, lawHtml, linkLaws, viewNums, pointNumbers, viewLawChange, trendCard, mountTrend } from "./extras.js?v=0d93e61a7b";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=38852dda9e";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, dueWrongKeys, startDueWrong, startQ, lawChangeQs, predictScore, bookAccuracy, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=38852dda9e";
+import { initExtras, lawHtml, linkLaws, viewNums, pointNumbers, viewLawChange, trendCard, mountTrend } from "./extras.js?v=38852dda9e";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -84,11 +84,35 @@ function renderNav() {
   const due = dueList().length, stuck = openStuck().length;
   const item = (h, label, n) => `<a href="#/${h}" class="${r === h ? "on" : ""}">${label}${n ? `<span class="badge">${n}</span>` : ""}</a>`;
   $("#nav").innerHTML = item("", "首页") + item("toc", "目录") + item("review", "今日复习", due) + item("kk", "过去问", dueWrongKeys().length) + item("nums", "速记表") + item("lawchange", "法改正") + item("stuck", "卡点本", stuck) + item("stats", "统计");
+  renderTabbar(r, due, stuck);
   const sy = { off: "", syncing: "sync-ing", ok: "sync-ok", error: "sync-err" }[sync.state];
   const sb = $("#syncBtn");
   sb.classList.toggle("on", r === "sync");
   sb.title = `同步：${syncTip()}`;
   sb.innerHTML = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M7 18.5h10a4 4 0 0 0 .6-7.95A5.5 5.5 0 0 0 7 9.6 4.5 4.5 0 0 0 7 18.5z"/></svg>${sy ? `<i class="sync-dot ${sy}"></i>` : ""}`;
+}
+
+// 手机底部标签栏：常用 4 个 + 「更多」
+const TAB_ICON = {
+  home: '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/>',
+  toc: '<path d="M5 5.5h14M5 12h14M5 18.5h9"/>',
+  review: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.5v3.2h3.2"/><path d="M12 8.5V12l2.5 1.8"/>',
+  kk: '<rect x="5" y="4" width="14" height="16" rx="2"/><path d="m9 12 2 2 4-4.5"/>',
+  more: '<circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/>',
+};
+const tabIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${TAB_ICON[k]}</svg>`;
+const MORE = [["nums", "数字・期限速记表"], ["lawchange", "法改正"], ["stuck", "卡点本"], ["stats", "统计"], ["sync", "同步与设备"]];
+function renderTabbar(r, due, stuck) {
+  const tb = $("#tabbar"); if (!tb) return;
+  const t = (h, k, label, n) => `<a href="#/${h}" class="${r === h ? "on" : ""}">${tabIcon(k)}<span>${label}</span>${n ? `<i class="badge">${n}</i>` : ""}</a>`;
+  const moreOn = MORE.some(([h]) => h === r);
+  tb.innerHTML = t("", "home", "首页") + t("toc", "toc", "目录") + t("review", "review", "复习", due) + t("kk", "kk", "过去问", dueWrongKeys().length)
+    + `<button class="${moreOn ? "on" : ""}" id="moreBtn">${tabIcon("more")}<span>${moreOn ? MORE.find(([h]) => h === r)[1].replace("数字・期限", "") : "更多"}</span>${stuck ? `<i class="badge">${stuck}</i>` : ""}</button>`;
+  const sh = $("#moreSheet");
+  sh.innerHTML = `<div class="more-in">${MORE.map(([h, l]) => `<a href="#/${h}" class="${r === h ? "on" : ""}">${l}${h === "stuck" && stuck ? `<span class="badge">${stuck}</span>` : ""}</a>`).join("")}</div>`;
+  sh.hidden = true;
+  $("#moreBtn").onclick = () => { sh.hidden = !sh.hidden; };
+  sh.onclick = (e) => { if (e.target === sh || e.target.closest("a")) sh.hidden = true; };
 }
 
 // ---------------- 首页 ----------------
@@ -189,7 +213,7 @@ function viewHome() {
       <p class="small muted" style="margin:4px 0 8px">每科用最近 30 次四选一（含模考）的正确率 × 本试题数估算；少于 10 次显示「数据不足」。${PASS_HINT}。</p>
       ${rows.map((x) => `<div class="hrow"><span class="hl">${esc(x.b.title)}</span>
         ${x.est !== null ? `<div class="hbar single"><i class="${x.acc >= 0.7 ? "ok" : "ng"}" style="width:${x.acc * 100}%"></i></div><span class="hv">${x.est.toFixed(1)} / ${x.b.examQ}</span>`
-          : `<span class="small muted" style="flex:1">${!x.has ? "题库待导入" : `数据不足（最近做了 ${x.n} 题，需要 10 题）`}</span><span class="hv">— / ${x.b.examQ}</span>`}</div>`).join("")}
+          : `<span class="small muted" style="flex:1">${!x.has ? "题库待导入" : `数据不足（已做 ${x.n}/10 题）`}</span><span class="hv">— / ${x.b.examQ}</span>`}</div>`).join("")}
       ${all ? "" : `<p class="small muted" style="margin:8px 0 0">四科都有数据后才显示总分预测。</p>`}`;
   }).catch(() => {});
 }
@@ -267,7 +291,7 @@ async function viewPoint(id, opts = {}) {
       <div class="seg" id="stSeg">${[["new", "未学"], ["learning", "学习中"], ["mastered", "已掌握"]].map(([k, v]) => `<button data-st="${k}" class="${p.status === k ? "on " + k : ""}">${v}</button>`).join("")}</div>
     </div>
   </div>
-  ${isDue || opts.review ? `<div class="review-bar"><div class="row"><b>复习这一节</b><span class="small muted">先在右边点「复习提问」让 AI 考你，答完后给自己打分：</span><span class="spacer"></span>
+  ${isDue || opts.review ? `<div class="review-bar"><div class="row"><b>复习这一节</b><span class="small muted">先在「AI 老师」里点「复习提问」让 AI 考你，答完后给自己打分：</span><span class="spacer"></span>
     <button class="btn sm" data-rate="forgot">忘了</button><button class="btn sm" data-rate="vague">模糊</button><button class="btn sm primary" data-rate="good">记得</button></div></div>` : ""}
   <div class="steps"><span>① 听原文</span><span>② 读讲义</span><span>③ 问 AI · 做题 · 讲给 AI 听</span><span>④ 标记掌握</span></div>
   <div class="grid2">
