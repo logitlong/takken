@@ -249,7 +249,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .crumbs { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .crumbs a { color: var(--muted); } .crumbs a:hover { color: var(--ink); }
 .phead { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; margin-bottom: 16px; }
-.phead .spacer { min-width: 0; }
+.phead .spacer { min-width: 0; flex: 1 1 320px; }
+@media (max-width: 640px) { .phead { gap: 10px; } .phead .spacer { flex-basis: 100%; } .phead > .row { flex-wrap: wrap; gap: 6px 8px; } .seg button { padding: 5px 11px; } }
 .steps { display: flex; gap: 0; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); margin-bottom: 18px; }
 .steps span { padding: 2px 12px 2px 0; margin-right: 12px; border-right: 1px solid var(--line-2); }
 .steps span:last-child { border-right: 0; }

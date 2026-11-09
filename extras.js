@@ -1,6 +1,6 @@
 // 法条弹窗 / 数字・期限速记表 / 法改正专页 / 做题趋势图
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID } from "./toc.js?v=a0070a2a71";
-import { loadData } from "./store.js?v=a0070a2a71";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID } from "./toc.js?v=703406309d";
+import { loadData } from "./store.js?v=703406309d";
 
 let C; // 由 app.js 注入：{ S, $, esc, md, today, addDays }
 export function initExtras(ctx) { C = ctx; }

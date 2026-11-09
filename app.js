@@ -1,8 +1,8 @@
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=a0070a2a71";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=703406309d";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=a0070a2a71";
-import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, dueWrongKeys, startDueWrong, startQ, lawChangeQs, predictScore, bookAccuracy, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=a0070a2a71";
-import { initExtras, lawHtml, linkLaws, viewNums, pointNumbers, viewLawChange, trendCard, mountTrend } from "./extras.js?v=a0070a2a71";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=703406309d";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, dueWrongKeys, startDueWrong, startQ, lawChangeQs, predictScore, bookAccuracy, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=703406309d";
+import { initExtras, lawHtml, linkLaws, viewNums, pointNumbers, viewLawChange, trendCard, mountTrend } from "./extras.js?v=703406309d";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
