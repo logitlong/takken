@@ -1,8 +1,8 @@
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=38852dda9e";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=a0070a2a71";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=38852dda9e";
-import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, dueWrongKeys, startDueWrong, startQ, lawChangeQs, predictScore, bookAccuracy, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=38852dda9e";
-import { initExtras, lawHtml, linkLaws, viewNums, pointNumbers, viewLawChange, trendCard, mountTrend } from "./extras.js?v=38852dda9e";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=a0070a2a71";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, dueWrongKeys, startDueWrong, startQ, lawChangeQs, predictScore, bookAccuracy, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=a0070a2a71";
+import { initExtras, lawHtml, linkLaws, viewNums, pointNumbers, viewLawChange, trendCard, mountTrend } from "./extras.js?v=a0070a2a71";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -791,7 +791,7 @@ function viewStuck() {
   $("#app").innerHTML = `<h1>卡点本</h1>
   <p class="muted small" style="margin-top:0">暂时想不通的地方记在这里。点「去问 AI」会回到那一节，并把问题填进输入框。</p>
   <div class="card">
-    <div class="row">
+    <div class="row stuck-add">
       <select id="newBook" class="btn">${BOOKS.map((b) => `<option value="${b.id}" ${b.courses.length ? "" : "disabled"}>${esc(b.title)}${b.courses.length ? "" : "（待导入）"}</option>`).join("")}</select>
       <select id="newCourse" class="btn" style="max-width:200px"></select>
       <select id="newPt" class="btn" style="max-width:220px"></select>

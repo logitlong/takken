@@ -635,3 +635,16 @@ a.lawref:hover { color: var(--accent); background: var(--accent-soft); text-deco
   .hero-today .chips { grid-column: 1 / -1; }
   .ring { width: 72px; height: 72px; } .ring-t { font-size: 19px; }
 }
+
+/* 卡点本（手机） */
+@media (max-width: 640px) {
+  .stuck-add { gap: 8px; }
+  .stuck-add select, .stuck-add input { flex: 1 1 100% !important; max-width: none !important; min-width: 0 !important; }
+  .stuck-add #newTxt { flex: 1 1 0 !important; }
+  .stuck-add #addStuck { flex: none; }
+  .stuck-filter select { flex: 1 1 40%; max-width: none; min-width: 0; }
+  .stuck-filter #sfQ { flex: 1 1 100%; }
+  .stuck-item { flex-wrap: wrap; column-gap: 10px; row-gap: 8px; }
+  .stuck-item > div { flex: 1 1 calc(100% - 40px) !important; }
+  .stuck-item > .btn[data-ask] { margin-left: 26px; }
+}
