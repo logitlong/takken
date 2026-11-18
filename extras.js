@@ -1,6 +1,6 @@
 // 法条弹窗 / 数字・期限速记表 / 法改正专页 / 做题趋势图
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID } from "./toc.js?v=703406309d";
-import { loadData } from "./store.js?v=703406309d";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID } from "./toc.js?v=f963d86b65";
+import { loadData } from "./store.js?v=f963d86b65";
 
 let C; // 由 app.js 注入：{ S, $, esc, md, today, addDays }
 export function initExtras(ctx) { C = ctx; }
@@ -86,8 +86,8 @@ async function openLaw(id, art, para) {
       return `<div class="law-ln ${hit ? "hit" : ""} ${/^　/.test(ln) ? "item" : ""}">${esc(ln)}</div>`;
     }).join("") : `<p class="muted">${esc(d.title)}里没有找到第 ${esc(k.replace("_", "条の"))} 条（可能已删除，或条文号写法不同）。</p>`;
     bg.querySelector(".modal").innerHTML = `
-      <div class="row"><b>${esc(d.title)}　${esc(a?.t || "")}</b><span class="muted small">${esc(a?.c || "")}</span><span class="spacer"></span><button class="btn sm" data-close>✕</button></div>
-      <div class="law-body">${body}</div>
+      <div class="row"><b lang="ja">${esc(d.title)}　${esc(a?.t || "")}</b><span class="muted small" lang="ja">${esc(a?.c || "")}</span><span class="spacer"></span><button class="btn sm" data-close>✕</button></div>
+      <div class="law-body" lang="ja">${body}</div>
       <div class="row small" style="margin-top:10px">
         <button class="btn sm" data-nav="${keys[i - 1] || ""}" ${i > 0 ? "" : "disabled"}>← 前一条</button>
         <button class="btn sm" data-nav="${keys[i + 1] || ""}" ${i >= 0 && i < keys.length - 1 ? "" : "disabled"}>后一条 →</button>

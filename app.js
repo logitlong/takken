@@ -1,8 +1,9 @@
-import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=703406309d";
+import { BOOKS, BOOK_BY_ID, POINTS, POINT_BY_ID, EXAM_DATE, DOJO_URL, DOJO_FIELDS, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=f963d86b65";
 import { ENV, DEFAULT_REPO, detectEnv, probeLocalAI, localNetPermission, ghCfg, setGhCfg, testToken, clearContentCache, loadPoint, loadAudio as fetchAudio, loadGen,
-  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=703406309d";
-import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, dueWrongKeys, startDueWrong, startQ, lawChangeQs, predictScore, bookAccuracy, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=703406309d";
-import { initExtras, lawHtml, linkLaws, viewNums, pointNumbers, viewLawChange, trendCard, mountTrend } from "./extras.js?v=703406309d";
+  loadLocalState, writeLocalState, stamp, stampBaseline, sync, syncNow } from "./store.js?v=f963d86b65";
+import { initKK, viewKK, viewBook, viewRun, viewWrong, viewMock, fillPointCard, wrongKeys, dueWrongKeys, startDueWrong, startQ, lawChangeQs, predictScore, bookAccuracy, kkTotals, kkToday, lastMock, courseAccuracy, pointInfo, heat } from "./quiz.js?v=f963d86b65";
+import { initLearn, viewTerms, viewCompare, viewTraps } from "./learn.js?v=f963d86b65";
+import { initExtras, lawHtml, linkLaws, viewNums, pointNumbers, viewLawChange, trendCard, mountTrend } from "./extras.js?v=f963d86b65";
 
 // ---------------- 状态 ----------------
 let S = { points: {}, stuck: [], days: {}, stuckDel: [] };
@@ -10,6 +11,7 @@ const INTV = [1, 3, 7, 14, 30, 60]; // 复习间隔（天）
 const SPEEDS = [0.8, 1, 1.25, 1.5, 1.75, 2];
 
 const $ = (sel, el = document) => el.querySelector(sel);
+const ja = (s) => `<span lang="ja">${esc(s)}</span>`; // 日文原文（コース/ポイント名等）
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // 中日文里 **（教材外补充）**法律、**「善意」**的 这种加粗，标准 Markdown 规则认不出来（紧挨全角标点），这里补一条规则
 marked.use({ extensions: [{
@@ -55,10 +57,17 @@ function touchDay() { S.days[today()] = (S.days[today()] || 0) + 1; }
 const askAI = (pts, text) => { openSide(pts, "chat"); sideSend(text); };
 initKK({ S: () => S, save, touchDay: () => touchDay(), $: (s, el) => $(s, el), esc: (x) => esc(x), md: (x) => md(x), addDays: (n) => addDays(n), today: () => today(),
   lawHtml, linkLaws, ai: () => ENV.ai, askAI, mountSide: (el, pts) => mountSide(el, pts), openSide: (pts, tab) => openSide(pts, tab) });
+initLearn({ S: () => S, save, touchDay: () => touchDay(), $: (s, el) => $(s, el), esc: (x) => esc(x), md: (x) => md(x) });
 initExtras({ S: () => S, $: (s, el) => $(s, el), esc: (x) => esc(x), md: (x) => md(x), today: () => today(), addDays: (n) => addDays(n), startQ });
 
 const statusOf = (id) => S.points[id]?.status || "new";
-const impOf = (pt) => S.points[pt.id]?.imp || pt.imp;
+// 重要度：教材コースマップ上印的（public/toc.js）固定不能改；教材没印的由自己在讲义页标（点「确定」才生效，之后要点「修改」才能改）
+const impOf = (pt) => pt.imp || S.points[pt.id]?.imp || null;
+// 重要度筛选（目录页、过去问页共用）：all | A | B | C | none
+const IMPF = [["all", "全部"], ["A", "A"], ["B", "B"], ["C", "C"], ["none", "未标"]];
+const impMatch = (imp, f) => f === "all" || (f === "none" ? !imp : imp === f);
+const getImpF = () => { try { return localStorage.getItem("takken.impf") || "all"; } catch { return "all"; } };
+const setImpF = (f) => { try { localStorage.setItem("takken.impf", f); } catch {} };
 const dueList = () => POINTS.filter((pt) => { const r = S.points[pt.id]?.review; return r && r.due <= today(); });
 const openStuck = () => S.stuck.filter((s) => !s.done);
 
@@ -83,7 +92,7 @@ function renderNav() {
   const r = location.hash.split("/")[1] || "";
   const due = dueList().length, stuck = openStuck().length;
   const item = (h, label, n) => `<a href="#/${h}" class="${r === h ? "on" : ""}">${label}${n ? `<span class="badge">${n}</span>` : ""}</a>`;
-  $("#nav").innerHTML = item("", "首页") + item("toc", "目录") + item("review", "今日复习", due) + item("kk", "过去问", dueWrongKeys().length) + item("nums", "速记表") + item("lawchange", "法改正") + item("stuck", "卡点本", stuck) + item("stats", "统计");
+  $("#nav").innerHTML = item("", "首页") + item("toc", "目录") + item("review", "今日复习", due) + item("kk", "过去问", dueWrongKeys().length) + item("terms", "用语") + item("cmp", "对比表") + item("traps", "读题") + item("nums", "速记表") + item("lawchange", "法改正") + item("stuck", "卡点本", stuck) + item("stats", "统计");
   renderTabbar(r, due, stuck);
   const sy = { off: "", syncing: "sync-ing", ok: "sync-ok", error: "sync-err" }[sync.state];
   const sb = $("#syncBtn");
@@ -101,7 +110,7 @@ const TAB_ICON = {
   more: '<circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/>',
 };
 const tabIcon = (k) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${TAB_ICON[k]}</svg>`;
-const MORE = [["nums", "数字・期限速记表"], ["lawchange", "法改正"], ["stuck", "卡点本"], ["stats", "统计"], ["sync", "同步与设备"]];
+const MORE = [["terms", "法律用语"], ["cmp", "易混对比表"], ["traps", "题型・陷阱・读题"], ["nums", "数字・期限速记表"], ["lawchange", "法改正"], ["stuck", "卡点本"], ["stats", "统计"], ["sync", "同步与设备"]];
 function renderTabbar(r, due, stuck) {
   const tb = $("#tabbar"); if (!tb) return;
   const t = (h, k, label, n) => `<a href="#/${h}" class="${r === h ? "on" : ""}">${tabIcon(k)}<span>${label}</span>${n ? `<i class="badge">${n}</i>` : ""}</a>`;
@@ -167,7 +176,7 @@ function viewHome() {
       </div>
     </div>
     ${next ? `<a class="hero-go" href="#/p/${next.id}"><span class="k">${statusOf(next.id) === "learning" ? "接着学" : "下一节"} · ${esc(nb.title)} 第${next.course}コース</span>
-      <span class="t">${esc(next.title)}</span><span class="s">${esc(next.courseTitle)}</span><span class="arrow">→</span></a>`
+      <span class="t">${ja(next.title)}</span><span class="s">${ja(next.courseTitle)}</span><span class="arrow">→</span></a>`
       : `<div class="hero-go"><span class="t">已导入的部分全部掌握了！</span><span class="s">等新科目导入后继续</span></div>`}
   </div>
   <div class="card">
@@ -241,9 +250,10 @@ function viewToc(bookId) {
     <div class="toc-help-grid">
       <div><b>第1コース … p.1 · 已掌握 0/6</b><br>p.1 = 这门コース从教材第 1 页开始；0/6 = 这门コース 6 个ポイント里已掌握 0 个。</div>
       <div><b>左边的小圆点</b><br><i class="st mastered"></i> 已掌握　<i class="st learning"></i> 学习中　<i class="st"></i> 还没学；<span class="due-tag">复习</span> = 今天到了复习的日子。</div>
-      <div><b>重要度（教材标注）</b><br><span class="imp A">A</span> 最重要，必考　<span class="imp B">B</span> 重要　<span class="imp C">C</span> 一般，有余力再看</div>
+      <div><b>重要度</b><br><span class="imp A">A</span> 最重要，必考　<span class="imp B">B</span> 重要　<span class="imp C">C</span> 一般，有余力再看。教材コースマップ上印了的固定不变；没印的在讲义页自己标。上面「按重要度看」可以只看某一类。</div>
       <div><b>出题场数（近 R2〜R7 共 ${nExamsHint} 场考试）</b><br><span class="freq hot">7/8场</span> = 8 场考试里有 7 场考到这个ポイント。红色 = 高频（6 场以上），橙色 = 常考（4〜5 场），灰色 = 偶尔考。</div>
     </div></details>
+  <div class="impf-bar"><span class="small muted">按重要度看</span><div class="seg" id="tocImpF">${IMPF.map(([k, v]) => `<button data-f="${k}">${v}</button>`).join("")}</div><span class="small muted" id="tocImpN"></span></div>
   <div class="route bk-${b.id}">
   ${b.courses.map((c) => {
     const pts = POINTS.filter((p) => p.book === b.id && p.course === c.n);
@@ -251,15 +261,30 @@ function viewToc(bookId) {
     const cls = done === pts.length ? "done" : c.n === nowCourse ? "now" : "";
     return `<div class="course ${cls}">
       <div class="stop"><svg viewBox="0 0 37 37"><circle class="bg" cx="18.5" cy="18.5" r="16" stroke-width="2"/>${done && done < pts.length ? `<circle class="fg" cx="18.5" cy="18.5" r="16" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="${SC}" stroke-dashoffset="${SC * (1 - done / pts.length)}"/>` : ""}</svg><span>${done === pts.length ? "✓" : c.n}</span></div>
-      <div class="course-h"><b>第${c.n}コース ${esc(c.title)}</b>${cls === "now" ? `<span class="now-tag">学到这里</span>` : ""}<span class="muted small" title="教材第 ${c.p} 页起；${pts.length} 个ポイント里已掌握 ${done} 个">教材 p.${c.p} · 已掌握 ${done}/${pts.length}</span></div>
+      <div class="course-h"><b>第${c.n}コース ${ja(c.title)}</b>${cls === "now" ? `<span class="now-tag">学到这里</span>` : ""}<span class="muted small" title="教材第 ${c.p} 页起；${pts.length} 个ポイント里已掌握 ${done} 个">教材 p.${c.p} · 已掌握 ${done}/${pts.length}</span></div>
       <div class="plist">${pts.map((pt) => {
         const imp = impOf(pt), r = S.points[pt.id]?.review;
-        return `<a class="pitem" href="#/p/${pt.id}" data-pid="${pt.id}"><i class="st ${statusOf(pt.id)}"></i>
-          <span class="t">${"❶❷❸❹❺❻❼❽"[pt.n - 1]} ${esc(pt.title)}</span>
+        return `<a class="pitem" href="#/p/${pt.id}" data-pid="${pt.id}" data-imp="${imp || ""}"><i class="st ${statusOf(pt.id)}"></i>
+          <span class="t">${"❶❷❸❹❺❻❼❽"[pt.n - 1]} ${ja(pt.title)}</span>
           ${r && r.due <= today() ? `<span class="due-tag">复习</span>` : ""}
-          ${imp ? `<span class="imp ${imp}" title="教材重要度 ${imp}（A 最重要 → C 一般）">${imp}</span>` : ""}</a>`;
+          ${imp ? `<span class="imp ${imp}" title="${pt.imp ? "教材" : "自己标的"}重要度 ${imp}（A 最重要 → C 一般）">${imp}</span>` : ""}</a>`;
       }).join("")}</div></div>`;
   }).join("")}</div>`;
+  const applyF = (f) => {
+    document.querySelectorAll("#tocImpF [data-f]").forEach((x) => x.classList.toggle("on", x.dataset.f === f));
+    let n = 0;
+    document.querySelectorAll(".route .course").forEach((c) => {
+      let any = false;
+      c.querySelectorAll(".pitem").forEach((a) => { const ok = impMatch(a.dataset.imp, f); a.hidden = !ok; if (ok) { any = true; n++; } });
+      c.hidden = !any;
+    });
+    $("#tocImpN").textContent = f === "all" ? "" : `${n} 个ポイント`;
+    const empty = $(".route .impf-empty");
+    if (!n && !empty) $(".route").insertAdjacentHTML("beforeend", `<div class="empty impf-empty">没有${f === "none" ? "未标重要度" : ` ${f} 类`}的ポイント。</div>`);
+    else if (n && empty) empty.remove();
+  };
+  applyF(getImpF());
+  $("#tocImpF").onclick = (e) => { const b = e.target.closest("[data-f]"); if (b) { setImpF(b.dataset.f); applyF(b.dataset.f); } };
   pointInfo().then(({ m, nExams }) => {
     document.querySelectorAll(".pitem[data-pid]").forEach((a) => {
       const h = heat(m.get(a.dataset.pid), nExams);
@@ -270,6 +295,23 @@ function viewToc(bookId) {
 
 // ---------------- 知识点页 ----------------
 let cur = null; // { id, segments, streaming }
+
+function renderImp(pt, editing = false, pick = null) {
+  const box = $("#impBox"); if (!box) return;
+  const mine = S.points[pt.id]?.imp;
+  if (pt.imp) { box.innerHTML = `<span class="imp-tag imp ${pt.imp}" title="教材コースマップ上印的重要度，不能改">重要度 ${pt.imp} · 教材</span>`; return; }
+  if (mine && !editing) {
+    box.innerHTML = `<span class="imp-tag imp ${mine}" title="自己标的重要度（A 最重要 → C 一般）">重要度 ${mine}</span><button class="btn sm imp-edit" id="impEdit">修改</button>`;
+    $("#impEdit").onclick = () => renderImp(pt, true, mine);
+    return;
+  }
+  box.innerHTML = `<span class="small muted">重要度</span>
+    <div class="seg" id="impSeg">${["A", "B", "C"].map((x) => `<button data-imp="${x}" class="${pick === x ? "on learning" : ""}">${x}</button>`).join("")}</div>
+    <button class="btn sm primary" id="impOk" ${pick ? "" : "disabled"}>确定</button>${mine ? `<button class="btn sm" id="impCancel">取消</button>` : ""}`;
+  $("#impSeg").onclick = (e) => { const b = e.target.closest("[data-imp]"); if (b) renderImp(pt, true, b.dataset.imp); };
+  $("#impOk").onclick = () => { if (!pick) return; P(pt.id).imp = pick; save(); renderImp(pt); };
+  if ($("#impCancel")) $("#impCancel").onclick = () => renderImp(pt);
+}
 
 async function viewPoint(id, opts = {}) {
   const pt = POINT_BY_ID[id];
@@ -282,79 +324,99 @@ async function viewPoint(id, opts = {}) {
   cur = { id, segments: [], streaming: false, gen: null };
 
   $("#app").innerHTML = `
-  <div class="crumbs"><a href="#/toc/${pt.book}">${pt.bookTitle}</a> › 第${pt.course}コース ${esc(pt.courseTitle)} › 教材 ${pt.volume} p.${pt.page}</div>
+  <div class="crumbs row"><span><a href="#/toc/${pt.book}">${pt.bookTitle}</a> › 第${pt.course}コース ${ja(pt.courseTitle)} › 教材 ${pt.volume} p.${pt.page}</span><span class="spacer"></span>
+    <span class="pager-top">${prev ? `<a href="#/p/${prev.id}" title="${esc(prev.title)}">← 上一节</a>` : ""}${next ? `<a href="#/p/${next.id}" title="${esc(next.title)}">下一节 →</a>` : ""}</span></div>
   <div class="phead">
-    <div class="spacer"><h1>第${pt.n}ポイント　${esc(pt.title)}</h1></div>
+    <div class="spacer"><h1>第${pt.n}ポイント　${ja(pt.title)}</h1></div>
     <div class="row">
-      <span class="small muted">重要度</span>
-      <div class="seg" id="impSeg">${["A", "B", "C"].map((x) => `<button data-imp="${x}" class="${impOf(pt) === x ? "on learning" : ""}">${x}</button>`).join("")}</div>
+      <span id="impBox" class="imp-box"></span>
       <div class="seg" id="stSeg">${[["new", "未学"], ["learning", "学习中"], ["mastered", "已掌握"]].map(([k, v]) => `<button data-st="${k}" class="${p.status === k ? "on " + k : ""}">${v}</button>`).join("")}</div>
     </div>
   </div>
-  ${isDue || opts.review ? `<div class="review-bar"><div class="row"><b>复习这一节</b><span class="small muted">先在「AI 老师」里点「复习提问」让 AI 考你，答完后给自己打分：</span><span class="spacer"></span>
+  ${isDue || opts.review ? `<div class="review-bar"><div class="row"><b>复习这一节</b><span class="small muted">先让 AI 考你几个问题，答完后给自己打分：</span>${ENV.ai ? `<button class="btn sm" id="reviewAsk">让 AI 考我</button>` : ""}<span class="spacer"></span>
     <button class="btn sm" data-rate="forgot">忘了</button><button class="btn sm" data-rate="vague">模糊</button><button class="btn sm primary" data-rate="good">记得</button></div></div>` : ""}
-  <div class="steps"><span>① 听原文</span><span>② 读讲义</span><span>③ 问 AI · 做题 · 讲给 AI 听</span><span>④ 标记掌握</span></div>
-  <div class="grid2">
-    <div>
-      <div class="card">
-        <div class="tabs"><button data-tab="audio" class="on">原文朗读</button><button data-tab="explain">中文讲义</button><button data-tab="cards">闪卡</button><button data-tab="notes">我的笔记</button></div>
-        <div id="tab-audio"><div class="empty">加载中…</div></div>
-        <div id="tab-explain" hidden></div>
+  <div class="study">
+    <section class="card study-l">
+      <div class="study-h"><b>原文朗读</b><span class="small muted">听一句、对照右边讲义看一句</span></div>
+      <div id="tab-audio" class="study-audio"><div class="empty">加载中…</div></div>
+    </section>
+    <section class="card study-r">
+      <div class="tabs study-tabs">
+        <button data-tab="explain">中文讲义</button><button data-tab="cards">闪卡</button><button data-tab="kk">真题</button><button data-tab="notes">笔记</button><button data-tab="chat">AI 老师</button>
+      </div>
+      <div class="study-body">
+        <div id="tab-explain" hidden><div id="explainBox"></div><div id="numBox" class="num-box" hidden></div></div>
         <div id="tab-cards" hidden></div>
+        <div id="tab-kk" hidden>
+          <div class="row" style="margin-bottom:8px"><b>本节真题</b><span class="spacer"></span>${ENV.ai ? `<button class="btn sm" id="wrongQ">做错了？让 AI 讲</button>` : ""}</div>
+          <div id="kkBox"><div class="empty">加载题库…</div></div>
+          <details style="margin-top:14px"><summary class="small muted">外部网站（宅建試験ドットコム）</summary>
+            ${pt.dojo ? `<p class="small" style="margin:8px 0">本节对应「${pt.dojo.n}. ${esc(pt.dojo.name)}」分野。跳过去后点书签栏的 <b>📌 宅建</b> 直接开始；做完再点一次，一問一答的对错会自动记回来。${dojoSummary(pt)}</p>` : ""}
+            <div class="row">
+              <button class="btn sm" data-dojo="marubatu">一問一答（○×）↗</button>
+              <button class="btn sm" data-dojo="kakomon">过去问（四选一）↗</button>
+              <span class="small muted">手动记：</span>
+              <span class="tally"><button class="btn sm" data-tally="ok" title="记一次对">对 <b>${p.quiz?.ok || 0}</b></button><button class="btn sm" data-dec="ok" title="点错了，减一">−</button></span>
+              <span class="tally"><button class="btn sm" data-tally="ng" title="记一次错">错 <b>${p.quiz?.ng || 0}</b></button><button class="btn sm" data-dec="ng" title="点错了，减一">−</button></span>
+            </div>
+          </details>
+        </div>
         <div id="tab-notes" hidden>
-          <textarea id="notes" rows="10" placeholder="用自己的话写下这一节的要点。AI 回答时也会参考你的笔记。">${esc(p.notes)}</textarea>
-          <p class="small muted">自动保存。</p>
+          <div class="tn-h"><b>音频笔记</b><span class="small muted">听到哪里不懂，点左边「✎ 这里记一笔」（或按 <kbd>N</kbd>），笔记就记在那一刻。点笔记前面的时间可以跳回去重听。</span></div>
+          <div class="tn-new" id="tnNew" hidden>
+            <div class="tn-quote"><span class="tn-t" id="tnT"></span><span lang="ja" id="tnQ"></span></div>
+            <textarea id="tnInput" rows="2" placeholder="这里哪里不懂 / 想记什么？（Enter 保存，Shift+Enter 换行，Esc 取消）"></textarea>
+            <div class="row"><span class="small muted" id="tnHint"></span><span class="spacer"></span><button class="btn sm" id="tnCancel">取消</button><button class="btn sm primary" id="tnSave">保存</button></div>
+          </div>
+          <div id="tnList"></div>
+          <div class="tn-h tn-h2"><b>整体笔记</b><span class="small muted">用自己的话写这一节的要点。自动保存，AI 回答时会参考（音频笔记也会）。</span></div>
+          <textarea id="notes" rows="8" placeholder="用自己的话写下这一节的要点。">${esc(p.notes)}</textarea>
+        </div>
+        <div id="tab-chat" class="chat" hidden>
+          <div class="row chat-top">
+            <div class="quick" ${ENV.ai ? "" : "hidden"}>
+              <button class="btn sm" data-q="again">换个例子再讲</button>
+              <button class="btn sm" data-q="quiz">出 3 道题</button>
+              <button class="btn sm" data-q="teach">我讲给你听</button>
+              <button class="btn sm" data-q="compare">易混点对比</button>
+              <button class="btn sm" data-q="review">复习提问</button>
+            </div><span class="spacer"></span><button class="btn sm" id="clearChat">清空</button>
+          </div>
+          <div class="msgs" id="msgs"></div>
+          ${ENV.ai ? `<div class="composer">
+            <textarea id="input" rows="2" placeholder="哪里不懂？直接问。（Enter 发送，Shift+Enter 换行）"></textarea>
+            <button class="btn primary" id="send">发送</button>
+          </div>` : `<div class="no-ai-note">这台设备不连接 AI。上面是在电脑上问过的对话记录；要问 AI，请到电脑上打开这一节。<br>不懂的地方可以先 <a href="#/stuck">记进卡点本</a>。</div>`}
         </div>
       </div>
-      <div class="card" id="numBox" hidden></div>
-      <div class="card">
-        <div class="row"><h2 style="margin:0">本节真题</h2><span class="spacer"></span>${ENV.ai ? `<button class="btn sm" id="wrongQ">做错了？让 AI 讲</button>` : ""}</div>
-        <div id="kkBox"><div class="empty">加载题库…</div></div>
-        <details style="margin-top:10px"><summary class="small muted">外部网站（宅建試験ドットコム）</summary>
-          ${pt.dojo ? `<p class="small" style="margin:8px 0">本节对应「${pt.dojo.n}. ${esc(pt.dojo.name)}」分野。跳过去后点书签栏的 <b>📌 宅建</b> 直接开始；做完再点一次，一問一答的对错会自动记回来。${dojoSummary(pt)}</p>` : ""}
-          <div class="row">
-            <button class="btn sm" data-dojo="marubatu">一問一答（○×）↗</button>
-            <button class="btn sm" data-dojo="kakomon">过去问（四选一）↗</button>
-            <span class="small muted">手动记：</span>
-            <span class="tally"><button class="btn sm" data-tally="ok" title="记一次对">对 <b>${p.quiz?.ok || 0}</b></button><button class="btn sm" data-dec="ok" title="点错了，减一">−</button></span>
-            <span class="tally"><button class="btn sm" data-tally="ng" title="记一次错">错 <b>${p.quiz?.ng || 0}</b></button><button class="btn sm" data-dec="ng" title="点错了，减一">−</button></span>
-          </div>
-        </details>
-      </div>
-      <div class="pager">
-        ${prev ? `<a class="btn" href="#/p/${prev.id}">← ${esc(prev.title)}</a>` : "<span></span>"}
-        ${next ? `<a class="btn" href="#/p/${next.id}">${esc(next.title)} →</a>` : "<span></span>"}
-      </div>
-    </div>
-    <div class="side"><div class="card chat">
-      <div class="row" style="margin-bottom:8px"><h2 style="margin:0">AI 老师</h2><span class="spacer"></span><button class="btn sm" id="clearChat">清空</button></div>
-      <div class="quick" ${ENV.ai ? "" : "hidden"}>
-        <button class="btn sm" data-q="again">换个例子再讲</button>
-        <button class="btn sm" data-q="quiz">出 3 道题</button>
-        <button class="btn sm" data-q="teach">我讲给你听</button>
-        <button class="btn sm" data-q="compare">易混点对比</button>
-        <button class="btn sm" data-q="review">复习提问</button>
-      </div>
-      <div class="msgs" id="msgs"></div>
-      ${ENV.ai ? `<div class="composer">
-        <textarea id="input" rows="2" placeholder="哪里不懂？直接问。（Enter 发送，Shift+Enter 换行）"></textarea>
-        <button class="btn primary" id="send">发送</button>
-      </div>` : `<div class="no-ai-note">这台设备不连接 AI。上面是在电脑上问过的对话记录；要问 AI，请到电脑上打开这一节。<br>不懂的地方可以先 <a href="#/stuck">记进卡点本</a>。</div>`}
-    </div></div>
+    </section>
   </div>`;
 
   // 事件
   $("#stSeg").onclick = (e) => { const b = e.target.closest("[data-st]"); if (b) { setStatus(id, b.dataset.st); viewPoint(id); } };
-  $("#impSeg").onclick = (e) => { const b = e.target.closest("[data-imp]"); if (b) { P(id).imp = b.dataset.imp; save(); viewPoint(id); } };
   document.querySelectorAll("[data-rate]").forEach((b) => b.onclick = () => {
     rate(id, b.dataset.rate);
     const nextDue = dueList()[0];
     location.hash = nextDue ? `#/p/${nextDue.id}/review` : "#/review";
   });
-  document.querySelectorAll("[data-tab]").forEach((b) => b.onclick = () => {
-    document.querySelectorAll("[data-tab]").forEach((x) => x.classList.toggle("on", x === b));
-    ["audio", "explain", "cards", "notes"].forEach((t) => $("#tab-" + t).hidden = t !== b.dataset.tab);
+  renderImp(pt);
+  // 右栏标签：记住上次看的是哪个（问 AI / 复习时直接打开 AI 老师）
+  const TABS = ["explain", "cards", "kk", "notes", "chat"];
+  const showTab = (t) => {
+    document.querySelectorAll(".study-tabs [data-tab]").forEach((x) => x.classList.toggle("on", x.dataset.tab === t));
+    TABS.forEach((k) => $("#tab-" + k).hidden = k !== t);
+    if (t === "chat") $("#msgs").scrollTop = 1e9;
+  };
+  document.querySelectorAll(".study-tabs [data-tab]").forEach((b) => b.onclick = () => {
+    showTab(b.dataset.tab);
+    try { localStorage.setItem("takken.ptab", b.dataset.tab); } catch {}
   });
+  let firstTab = "explain";
+  try { firstTab = localStorage.getItem("takken.ptab") || "explain"; } catch {}
+  showTab(opts.ask || opts.review ? "chat" : TABS.includes(firstTab) ? firstTab : "explain");
+  cur.showTab = showTab;
+  initTnotes();
+  if ($("#reviewAsk")) $("#reviewAsk").onclick = () => { showTab("chat"); send(QUICK.review); };
   // 手动记：点按钮 +1，点旁边的「−」减一（点错了可以改回来，不会减到 0 以下）
   const tally = (k, d) => {
     const q = (P(id).quiz ||= { ok: 0, ng: 0 });
@@ -368,7 +430,7 @@ async function viewPoint(id, opts = {}) {
   document.querySelectorAll("[data-dojo]").forEach((b) => b.onclick = () => openDojo(b.dataset.dojo, pt.dojo?.n));
   if ($("#wrongQ")) $("#wrongQ").onclick = () => {
     $("#input").value = "我做错了一道真题：\n【题目】\n\n【我的答案】\n【正确答案】\n请告诉我错在哪里、对应这一节的哪条规则，以及下次怎么避免。";
-    $("#input").rows = 7; $("#input").focus();
+    showTab("chat"); $("#input").rows = 7; $("#input").focus();
   };
   fillPointCard(id, $("#kkBox"));
   pointNumbers(id).then((rows) => {
@@ -490,9 +552,11 @@ async function loadAudio(id) {
   box.innerHTML = `
     ${d.audio ? `<audio id="audio" controls preload="metadata"></audio><div class="small muted" id="audioMsg"></div>
     <div class="row"><span class="small muted">速度</span><div class="speeds">${SPEEDS.map((s) => `<button class="btn sm ${s === rate ? "on" : ""}" data-sp="${s}">${s}×</button>`).join("")}</div>
-    <span class="spacer"></span><label class="small muted"><input type="checkbox" id="follow" checked> 自动滚动</label></div>` : ""}
-    <div class="transcript" id="tr">${cur.segments.map((s, i) => `<div class="line" data-i="${i}"><span class="ts">${fmtT(s.start)}</span><span>${esc(s.text)}</span></div>`).join("")}</div>
-    <p class="small muted" style="margin:8px 0 0">原文由语音识别生成，个别术语可能有错字，以教材为准。点击任意一句可以从那里开始播放。</p>`;
+    <span class="spacer"></span><label class="small muted"><input type="checkbox" id="follow" checked> 自动滚动</label></div>
+    <div class="row note-here-row"><button class="btn sm note-here" id="noteHere">✎ 这里记一笔 <span class="small" id="noteHereT">0:00</span></button><span class="small muted">听到不懂就点，会先暂停</span></div>` : ""}
+    <div class="transcript" id="tr">${cur.segments.map((s, i) => `<div class="line" data-i="${i}"><span class="ts">${fmtT(s.start)}</span><span lang="ja" class="tx">${esc(s.text)}</span><button class="ln-note" data-note="${i}" title="在这一句记笔记">✎</button></div>`).join("")}</div>
+    <p class="small muted" style="margin:8px 0 0">原文由语音识别生成，个别术语可能有错字，以教材为准。点击任意一句从那里播放，点句子后面的 ✎ 在这一句记笔记。</p>`;
+  renderTnMarks();
   const audio = $("#audio");
   if (!audio) return;
   if (!ENV.local) $("#audioMsg").textContent = "音频下载中…（第一次打开这一节需要下载，之后会缓存）";
@@ -506,10 +570,15 @@ async function loadAudio(id) {
     audio.playbackRate = Number(b.dataset.sp); localStorage.setItem("rate", b.dataset.sp);
     box.querySelectorAll("[data-sp]").forEach((x) => x.classList.toggle("on", x === b));
   });
-  $("#tr").onclick = (e) => { const l = e.target.closest(".line"); if (l) { audio.currentTime = cur.segments[l.dataset.i].start; audio.play(); } };
+  $("#noteHere").onclick = () => openNote();
+  $("#tr").onclick = (e) => {
+    const n = e.target.closest("[data-note]"); if (n) { openNote(Number(n.dataset.note)); return; }
+    const l = e.target.closest(".line"); if (l) { audio.currentTime = cur.segments[l.dataset.i].start; audio.play(); }
+  };
   let last = -1;
   audio.ontimeupdate = () => {
     const t = audio.currentTime;
+    $("#noteHereT").textContent = fmtT(t);
     let i = cur.segments.findIndex((s) => t >= s.start && t < s.end);
     if (i < 0) return;
     if (i === last) return;
@@ -518,13 +587,103 @@ async function loadAudio(id) {
     tr.querySelector(".cur")?.classList.remove("cur");
     const el = tr.querySelector(`[data-i="${i}"]`);
     el.classList.add("cur");
+    document.querySelectorAll(".tn-item").forEach((x) => x.classList.toggle("playing", Number(x.dataset.seg) === i));
     if ($("#follow").checked) tr.scrollTo({ top: el.offsetTop - tr.offsetTop - tr.clientHeight / 3, behavior: "smooth" });
   };
 }
 
+// ----- 音频笔记：p.tnotes = [{ id, t: 秒, seg: 第几句, q: 那句原文, text, created }] -----
+// 听到哪里不懂就记在那一刻；点时间跳回去重听，原文里有笔记的句子会标出来。
+const segAt = (t) => { const g = cur.segments; let i = g.findIndex((s) => t >= s.start && t < s.end); if (i < 0) { i = g.findLastIndex((s) => s.start <= t); } return Math.max(0, i); };
+function notesForAI(p) {
+  const tn = (p.tnotes || []).map((n) => `- ${fmtT(n.t)}「${n.q}」：${n.text}`).join("\n");
+  return [p.notes, tn && `【听原文时记下的音频笔记】\n${tn}`].filter(Boolean).join("\n\n");
+}
+function openNote(i) {
+  const audio = $("#audio");
+  const t = i != null ? cur.segments[i]?.start ?? 0 : audio?.currentTime || 0;
+  const seg = i != null ? i : segAt(t);
+  cur.noteAt = { t, seg, edit: null, resume: audio && !audio.paused };
+  if (audio && !audio.paused) audio.pause();
+  showNoteBox();
+}
+function showNoteBox(edit) {
+  const n = cur.noteAt; if (!n) return;
+  cur.showTab?.("notes");
+  $("#tnNew").hidden = false;
+  $("#tnT").textContent = fmtT(n.t);
+  $("#tnQ").textContent = n.q ?? cur.segments[n.seg]?.text ?? "";
+  $("#tnHint").textContent = n.resume ? "保存后继续播放" : "";
+  $("#tnInput").value = edit?.text || "";
+  $("#tnInput").focus();
+}
+function closeNoteBox() {
+  const n = cur.noteAt; cur.noteAt = null;
+  $("#tnNew").hidden = true;
+  if (n?.resume) $("#audio")?.play();
+}
+function saveNote() {
+  const n = cur.noteAt, text = $("#tnInput").value.trim(), p = P(cur.id);
+  if (!n) return;
+  if (text) {
+    p.tnotes ||= [];
+    if (n.edit) Object.assign(p.tnotes.find((x) => x.id === n.edit) || {}, { text });
+    else p.tnotes.push({ id: Date.now(), t: Math.round(n.t * 10) / 10, seg: n.seg, q: cur.segments[n.seg]?.text || "", text, created: today() });
+    p.tnotes.sort((a, b) => a.t - b.t);
+    touchDay(); save();
+  }
+  closeNoteBox(); renderTnotes();
+}
+function renderTnotes() {
+  const list = P(cur.id).tnotes || [];
+  $("#tnList").innerHTML = list.length
+    ? list.map((n) => `<div class="tn-item" data-k="${n.id}" data-seg="${n.seg}">
+        <button class="tn-t" data-seek="${n.t}" title="跳到这里播放">▶ ${fmtT(n.t)}</button>
+        <div class="tn-body"><div class="tn-q" lang="ja">${esc(n.q)}</div><div class="tn-text">${esc(n.text).replace(/\n/g, "<br>")}</div></div>
+        <div class="tn-acts">${ENV.ai ? `<button data-tnask title="把这一句和你的笔记发给 AI 老师">问 AI</button>` : ""}<button data-tnedit>改</button><button data-tndel>删</button></div></div>`).join("")
+    : `<div class="empty small tn-empty">还没有音频笔记。边听边记，复习时一眼就能看到当时卡在哪里。</div>`;
+  renderTnMarks();
+}
+function renderTnMarks() {
+  const has = new Set((P(cur.id).tnotes || []).map((n) => n.seg));
+  document.querySelectorAll("#tr .line").forEach((l) => l.classList.toggle("has-note", has.has(Number(l.dataset.i))));
+}
+function initTnotes() {
+  renderTnotes();
+  $("#tnSave").onclick = saveNote;
+  $("#tnCancel").onclick = closeNoteBox;
+  $("#tnInput").onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); saveNote(); }
+    else if (e.key === "Escape") closeNoteBox();
+  };
+  $("#tnList").onclick = (e) => {
+    const item = e.target.closest(".tn-item"); if (!item) return;
+    const p = P(cur.id), n = (p.tnotes || []).find((x) => x.id === Number(item.dataset.k)); if (!n) return;
+    const audio = $("#audio");
+    if (e.target.closest("[data-seek]")) {
+      const el = document.querySelector(`#tr [data-i="${n.seg}"]`);
+      if (el) $("#tr").scrollTo({ top: el.offsetTop - $("#tr").offsetTop - $("#tr").clientHeight / 3, behavior: "smooth" });
+      if (audio) { audio.currentTime = n.t; audio.play(); }
+    } else if (e.target.closest("[data-tndel]")) {
+      if (confirm("删掉这条音频笔记？")) { p.tnotes = p.tnotes.filter((x) => x !== n); save(); renderTnotes(); }
+    } else if (e.target.closest("[data-tnedit]")) {
+      cur.noteAt = { t: n.t, seg: n.seg, q: n.q, edit: n.id, resume: false }; showNoteBox(n);
+    } else if (e.target.closest("[data-tnask]")) {
+      cur.showTab?.("chat");
+      send(`我在听原文 ${fmtT(n.t)} 这一句：\n「${n.q}」\n我的笔记：${n.text}\n请结合这一节的内容帮我讲清楚。`);
+    }
+  };
+}
+// 快捷键 N：在当前播放位置记笔记
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "n" && e.key !== "N") return;
+  if (e.metaKey || e.ctrlKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName) || !$("#tnList") || !cur?.segments?.length) return;
+  e.preventDefault(); openNote();
+});
+
 // ----- 中文讲义 -----
 function renderExplain() {
-  const p = P(cur.id), box = $("#tab-explain");
+  const p = P(cur.id), box = $("#explainBox");
   if (cur.streaming === "explain") return;
   if (!cur.gen && !p.explain) { box.innerHTML = `<div class="empty">讲义加载中…</div>`; return; }
   const text = p.explain || cur.gen?.explain;
@@ -536,7 +695,7 @@ function renderExplain() {
 }
 async function genExplain() {
   if (cur.streaming) return;
-  const id = cur.id, box = $("#tab-explain");
+  const id = cur.id, box = $("#explainBox");
   cur.streaming = "explain";
   box.innerHTML = `<div class="md typing"></div>`;
   const out = box.firstChild;
@@ -581,12 +740,12 @@ function renderCards() {
       <div class="flash ${d.flipped ? "flipped" : ""}" id="flash" title="点击翻面（空格键）">
         <div class="flash-tag">${esc(c.tag || "")}${st.ng ? ` · 错过 ${st.ng} 次` : ""}</div>
         <div class="flash-q">${esc(c.q)}</div>
-        ${d.flipped ? `<div class="flash-a md">${md(c.a)}</div>` : `<div class="flash-hint">先在心里回答，再点击翻面</div>`}
+        ${d.flipped ? `<div class="flash-a md">${md(c.a)}</div>` : `<div class="flash-hint">先在心里回答，再点卡片或按空格翻面 · 1 没记住 · 2 记住了</div>`}
       </div>
       <div class="row" style="justify-content:center;margin-top:12px">
-        ${d.flipped
-          ? `<button class="btn" data-grade="ng">没记住 <span class="small muted">1</span></button><button class="btn primary" data-grade="ok">记住了 <span class="small">2</span></button>`
-          : `<button class="btn primary" id="flipBtn">翻面 <span class="small">空格</span></button>`}
+        <button class="btn" data-grade="ng">没记住 <kbd>1</kbd></button>
+        <button class="btn" id="flipBtn">${d.flipped ? "翻回正面" : "翻面"} <kbd>空格</kbd></button>
+        <button class="btn primary" data-grade="ok">记住了 <kbd>2</kbd></button>
       </div>
       <div class="row small" style="margin-top:14px"><span class="spacer"></span>
         <button class="btn sm" data-deck="all">从头练全部</button>
@@ -657,8 +816,8 @@ async function genCards() {
 document.addEventListener("keydown", (e) => {
   if (!cur?.deck || $("#tab-cards")?.hidden || /INPUT|TEXTAREA/.test(document.activeElement?.tagName) || !$("#flash")) return;
   if (e.key === " ") { e.preventDefault(); flipCard(); }
-  else if (cur.deck.flipped && e.key === "1") gradeCard("ng");
-  else if (cur.deck.flipped && e.key === "2") gradeCard("ok");
+  else if (e.key === "1") gradeCard("ng");
+  else if (e.key === "2") gradeCard("ok");
 });
 
 // ----- 对话 -----
@@ -692,7 +851,7 @@ async function send(text) {
   $("#msgs").querySelector(".empty")?.remove();
   $("#msgs").appendChild(wrap);
   const bubble = wrap.firstChild;
-  const answer = await streamAI({ pointId: id, history: p.chat, notes: p.notes }, (t) => {
+  const answer = await streamAI({ pointId: id, history: p.chat, notes: notesForAI(p) }, (t) => {
     if (cur.id !== id) return;
     bubble.innerHTML = md(t);
     const m = $("#msgs"); if (m.scrollHeight - m.scrollTop - m.clientHeight < 200) m.scrollTop = 1e9;
@@ -760,12 +919,12 @@ function viewReview() {
   <p class="muted small" style="margin-top:0">标记「已掌握」的ポイント会在 1、3、7、14、30、60 天后再次出现。复习时让 AI 提问，然后根据自己答得怎么样打分。</p>
   <div class="card">${due.length ? `
     <div class="row" style="margin-bottom:10px"><b>今天要复习 ${due.length} 个</b><span class="spacer"></span><a class="btn primary" href="#/p/${due[0].id}/review">开始复习 →</a></div>
-    <div class="plist">${due.map((pt) => `<a class="pitem" href="#/p/${pt.id}/review"><i class="st ${statusOf(pt.id)}"></i><span class="t">${esc(pt.courseTitle)} › ${esc(pt.title)}</span></a>`).join("")}</div>`
+    <div class="plist">${due.map((pt) => `<a class="pitem" href="#/p/${pt.id}/review"><i class="st ${statusOf(pt.id)}"></i><span class="t">${ja(pt.courseTitle)} › ${ja(pt.title)}</span></a>`).join("")}</div>`
     : `<div class="empty">今天没有要复习的。</div>`}</div>
   ${(() => { const w = dueWrongKeys().length, all = wrongKeys().length;
     return all ? `<div class="card"><div class="row"><h2 style="margin:0">到期的错题</h2><span class="spacer"></span>${w ? `<button class="btn primary" id="doDueWrong">做 ${w} 个到期错题 →</button>` : `<span class="small muted">今天没有到期的</span>`}</div>
       <p class="small muted" style="margin:6px 0 0">错题本共 ${all} 个，按 1 → 3 → 7 天间隔再出现。<a href="#/kk/wrong">看错题本</a></p></div>` : ""; })()}
-  ${upcoming.length ? `<div class="card"><h2>接下来</h2>${upcoming.map((pt) => `<div class="row small" style="padding:3px 0"><span class="muted" style="width:96px">${S.points[pt.id].review.due}</span><a href="#/p/${pt.id}">${esc(pt.courseTitle)} › ${esc(pt.title)}</a></div>`).join("")}</div>` : ""}`;
+  ${upcoming.length ? `<div class="card"><h2>接下来</h2>${upcoming.map((pt) => `<div class="row small" style="padding:3px 0"><span class="muted" style="width:96px">${S.points[pt.id].review.due}</span><a href="#/p/${pt.id}">${ja(pt.courseTitle)} › ${ja(pt.title)}</a></div>`).join("")}</div>` : ""}`;
   if ($("#doDueWrong")) $("#doDueWrong").onclick = startDueWrong;
 }
 
@@ -875,7 +1034,7 @@ function renderStuckList() {
         const inQA = kw.length && qa && kw.some((k) => `${qa.q}\n${qa.a}`.toLowerCase().includes(k)) && !kw.every((k) => s.text.toLowerCase().includes(k));
         return `<div class="stuck-item ${s.done ? "done" : ""}">
         <input type="checkbox" data-done="${s.id}" ${s.done ? "checked" : ""} title="已解决">
-        <div style="flex:1;min-width:0"><div class="txt">${mark(s.text)}</div><div class="small muted">${s.created} · <a href="#/p/${s.pointId}">${esc(pt?.title)}</a></div>
+        <div style="flex:1;min-width:0"><div class="txt">${mark(s.text)}</div><div class="small muted">${s.created} · <a href="#/p/${s.pointId}">${ja(pt?.title)}</a></div>
           ${qa ? `<details class="stuck-qa" ${inQA ? "open" : ""}><summary class="small">当初的问答${inQA ? "（关键词在这里）" : ""}</summary>
             ${qa.q ? `<div class="stuck-q"><b>我问：</b>${mark(qa.q).replace(/\n/g, "<br>")}</div>` : ""}
             <div class="stuck-a md">${md(qa.a)}</div></details>` : ""}</div>
@@ -906,7 +1065,7 @@ function renderSide() {
   el.innerHTML = `<div class="card side-card">
     <div class="row side-top">
       ${SIDE.pts.length > 1 ? `<select class="btn sm side-pt" id="sidePt">${SIDE.pts.map((id) => `<option value="${id}" ${id === SIDE.pid ? "selected" : ""}>${esc(POINT_BY_ID[id].courseTitle)} › ${esc(POINT_BY_ID[id].title)}</option>`).join("")}</select>`
-        : `<b class="side-pt-t">${esc(pt.courseTitle)} › ${esc(pt.title)}</b>`}
+        : `<b class="side-pt-t">${ja(pt.courseTitle)} › ${ja(pt.title)}</b>`}
       <span class="spacer"></span><a class="small" href="#/p/${pt.id}" title="打开这一节的课程页">课程页 ↗</a>
       <button class="icon-btn" id="sideClose" title="收起侧栏" aria-label="收起侧栏">✕</button>
     </div>
@@ -960,7 +1119,7 @@ async function sideSend(text) {
   const m = $("#sideMsgs"); m.querySelector(".empty")?.remove();
   const wrap = document.createElement("div"); wrap.className = "msg assistant"; wrap.innerHTML = `<div class="bubble md typing"></div>`;
   m.appendChild(wrap); m.scrollTop = 1e9;
-  const answer = await streamAI({ pointId: id, history: p.chat, notes: p.notes }, (t) => {
+  const answer = await streamAI({ pointId: id, history: p.chat, notes: notesForAI(p) }, (t) => {
     const b = $("#sideMsgs")?.querySelector(".msg.assistant:last-child .bubble.typing"); if (!b) return;
     b.innerHTML = md(t); const mm = $("#sideMsgs"); if (mm.scrollHeight - mm.scrollTop - mm.clientHeight < 200) mm.scrollTop = 1e9;
   });
@@ -979,6 +1138,9 @@ function route() {
   if (r === "kk") return id === "run" ? viewRun() : id === "wrong" ? viewWrong() : id === "mock" ? viewMock() : BOOK_BY_ID[id] ? viewBook(id) : viewKK();
   if (r === "toc") return viewToc(id);
   if (r === "nums") return viewNums(id);
+  if (r === "terms") return viewTerms(id);
+  if (r === "cmp") return viewCompare(id);
+  if (r === "traps") return viewTraps();
   if (r === "lawchange") return lawChangeQs().catch(() => []).then(viewLawChange);
   if (r === "review") return viewReview();
   if (r === "stuck") return viewStuck();

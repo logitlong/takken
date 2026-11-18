@@ -176,6 +176,9 @@ export function merge(a, b) {
   const seen4 = new Set();
   out.cardLog = [...a.cardLog, ...b.cardLog].filter((e) => { const k = e.join("@"); return !seen4.has(k) && seen4.add(k); }).sort((x, y) => x[3] - y[3]);
   out.plan = (b.plan?.t || 0) > (a.plan?.t || 0) ? b.plan : a.plan;
+  // 法律用语记忆：{ 用語: [1|0, 时间秒] }，每个词取较新的那条
+  out.terms = { ...(a.terms || {}) };
+  for (const [k, v] of Object.entries(b.terms || {})) if (!out.terms[k] || v[1] > out.terms[k][1]) out.terms[k] = v;
   for (const id of new Set([...Object.keys(a.points), ...Object.keys(b.points)])) {
     const x = a.points[id], y = b.points[id];
     out.points[id] = !x ? y : !y ? x : (y.t || 0) > (x.t || 0) ? y : x;

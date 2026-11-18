@@ -1,10 +1,18 @@
 // 过去问（站内题库）：四科总览 / 科目页 / 四选一 / 一問一答（○×）/ 模考 / 错题本 / 弱点 / 高频
 // 题库来自 RETIO 官方过去问，tools/kakomon.mjs 生成，每科一个文件 data/kakomon/<科目id>.json（没有的科目显示「待导入」）。
-import { BOOKS, BOOK_BY_ID, POINT_BY_ID, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=703406309d";
-import { loadKakomon } from "./store.js?v=703406309d";
+import { BOOKS, BOOK_BY_ID, POINT_BY_ID, EXAM_TOTAL, PASS_HINT } from "./toc.js?v=f963d86b65";
+import { loadKakomon } from "./store.js?v=f963d86b65";
 
 let C; // 由 app.js 注入：{ S, save, touchDay, $, esc, md, addDays, today, lawHtml, linkLaws, ai, askAI }
 export function initKK(ctx) { C = ctx; }
+
+// ---------- 重要度筛选（和目录页共用 localStorage 里的选择）----------
+const IMPF = [["all", "全部"], ["A", "A"], ["B", "B"], ["C", "C"], ["none", "未标"]];
+const impOfId = (id) => POINT_BY_ID[id]?.imp || C.S().points[id]?.imp || null;
+const getImpF = () => { try { return localStorage.getItem("takken.impf") || "all"; } catch { return "all"; } };
+const setImpF = (f) => { try { localStorage.setItem("takken.impf", f); } catch {} };
+// 题目挂着的ポイント里有一个符合就算
+const ptsMatch = (pts, f) => f === "all" || (pts || []).some((p) => (f === "none" ? !impOfId(p) : impOfId(p) === f));
 
 // ---------- 数据 ----------
 let DB = null, loading = null;
@@ -26,7 +34,8 @@ export async function kkDB() {
   return loading;
 }
 const courseKey = (pid) => { const p = POINT_BY_ID[pid]; return p ? `${p.book}:${p.course}` : ""; };
-const nExamsOf = (D) => Object.keys(D.exams).length;
+// 只数真正有题的考试（exams 里可能列了还没生成题目的年度）
+const nExamsOf = (D) => new Set(D.qs.map((q) => q.exam)).size;
 
 // ---------- 作答记录 S.kkLog = [[key, 1 对/0 错, 时间(秒)], …]；key = "R05-03"（四选一）或 "R05-03#2"（○× 一肢） ----------
 const log = () => (C.S().kkLog ||= []);
@@ -114,7 +123,6 @@ export async function viewKK() {
   const T = tally(), wrong = wrongKeys();
   const all = statFor([...D.qs.map((q) => q.id), ...D.stmts.map((x) => x.key)], T);
   const ready = BOOKS.filter((b) => D.byBook[b.id].qs.length);
-  const full = ready.length === BOOKS.length;
   const { m, nExams } = await pointInfo();
   const weak = [...m.values()].filter(WEAK).sort((a, b) => a.ok / a.n - b.ok / b.n).slice(0, 6);
   $("#app").innerHTML = `<h1>过去问</h1>
@@ -139,21 +147,16 @@ export async function viewKK() {
   }).join("")}</div>
   <div class="card">
     <div class="row"><h2 style="margin:0">模考</h2><span class="spacer"></span><a class="small" href="#/kk/wrong">错题本（今天到期 ${dueWrongKeys().length}）</a></div>
-    <p class="small muted" style="margin:8px 0">交卷前不显示对错，时间按本试节奏（2 小时 / 50 题，每题约 2 分 24 秒）。</p>
-    <div class="row">
-      <button class="btn primary" data-mockall ${full ? "" : "disabled"} title="${full ? "" : "四科题库都导入后才能做"}">全科模考 50 题 · 120 分钟</button>
-      ${ready.map((b) => `<button class="btn" data-mockbook="${b.id}">${esc(b.title)} ${b.examQ} 题 · ${Math.round(b.examQ * 2.4)} 分钟</button>`).join("")}
-    </div>
-    ${full ? "" : `<p class="small muted" style="margin:8px 0 0">全科模考要等四科题库都导入后开放；现在可以先做单科模考。</p>`}
+    <p class="small muted" style="margin:8px 0">自己选科目、年份（可多选，或全部混合）和题数。模考交卷前不显示对错；也可以当练习做，每题马上看解析。</p>
+    <div id="picker"></div>
     ${mockHistory()}
   </div>
   <div class="card"><h2>薄弱ポイント</h2>${weak.length ? weakRows(weak, nExams) : `<p class="small muted" style="margin:0">做题后，正确率低于 70% 的ポイント会出现在这里（每个至少答 3 次才算）。</p>`}</div>`;
   $("#app").onclick = (e) => {
     const b = e.target.closest("button"); if (!b) return;
-    if (b.dataset.mockall !== undefined) startMock(BOOKS.flatMap((x) => pickMock(D, x.id, x.examQ)), "全科模考");
-    if (b.dataset.mockbook) { const x = BOOK_BY_ID[b.dataset.mockbook]; startMock(pickMock(D, x.id, x.examQ), `${x.title} 模考`); }
     weakClick(b, D);
   };
+  mountPicker(D, $("#picker"));
 }
 function weakRows(list, nExams) {
   const { esc } = C;
@@ -173,13 +176,81 @@ function mockHistory() {
   const h = mocks().slice(-6).reverse();
   return h.length ? `<div style="margin-top:12px">${h.map((x) => `<div class="hrow kk-row small"><span class="muted" style="width:92px">${new Date(x.t * 1000).toLocaleDateString("sv-SE")}</span><span class="hl" style="flex:1">${esc(x.title)}</span><b>${x.score} / ${x.n}</b><span class="muted">${fmtS(x.secs)}</span></div>`).join("")}</div>` : "";
 }
-// 单科模考：尽量每场抽一题、分散年度；不足再随机补
-function pickMock(D, book, n) {
-  const pool = shuffle(D.byBook[book].qs);
-  const out = [], used = new Set();
-  for (const q of pool) if (out.length < n && !used.has(q.exam)) { out.push(q); used.add(q.exam); }
-  for (const q of pool) if (out.length < n && !out.includes(q)) out.push(q);
+
+// ---------- 自选出题：科目 × 年份 × 题数 → 模考（计时、交卷才看对错）或练习（每题马上看解析） ----------
+// 设置记在 localStorage（只是这台设备的偏好）：{ scope: "all" | 科目id, years: [考试id…]（空 = 全部年份）, n: "exam" | "max" | 数字 }
+const PK_KEY = "takken.pick";
+const getPK = () => { try { return JSON.parse(localStorage.getItem(PK_KEY)) || {}; } catch { return {}; } };
+const setPK = (c) => { try { localStorage.setItem(PK_KEY, JSON.stringify(c)); } catch {} };
+function pkPool(D, scope, years) {
+  const ys = new Set(years);
+  return D.qs.filter((q) => (scope === "all" || q.book === scope) && (!ys.size || ys.has(q.exam)));
+}
+// 全科：按本试各科题数的比例分（50 题 = 14 + 20 + 8 + 8），某科题不够时用别的科补
+function pkPick(D, scope, years, n) {
+  const pool = pkPool(D, scope, years);
+  if (scope !== "all") return spreadPick(pool, n);
+  const books = BOOKS.filter((b) => pool.some((q) => q.book === b.id));
+  const tot = books.reduce((x, b) => x + b.examQ, 0);
+  const out = books.flatMap((b) => spreadPick(pool.filter((q) => q.book === b.id), Math.round((n * b.examQ) / tot)));
+  if (out.length < n) out.push(...shuffle(pool.map((q) => q.id).filter((id) => !out.includes(id))).slice(0, n - out.length));
+  return out.slice(0, n).sort((a, b) => D.byId[a].no - D.byId[b].no || D.byId[a].exam.localeCompare(D.byId[b].exam));
+}
+function spreadPick(pool, n) {
+  const sh = shuffle(pool), out = [], used = new Set();
+  for (const q of sh) if (out.length < n && !used.has(q.exam)) { out.push(q); used.add(q.exam); }
+  for (const q of sh) if (out.length < n && !out.includes(q)) out.push(q);
   return out.sort((a, b) => a.no - b.no).map((q) => q.id);
+}
+// el：放面板的容器；fixedBook：科目页里固定这一科，不显示科目选择
+function mountPicker(D, el, fixedBook) {
+  const { esc } = C;
+  const ready = BOOKS.filter((b) => D.byBook[b.id].qs.length);
+  const render = () => {
+    const c = getPK();
+    const scope = fixedBook || (c.scope === "all" || ready.some((b) => b.id === c.scope) ? c.scope : "all");
+    const inScope = D.qs.filter((q) => scope === "all" || q.book === scope);
+    const exams = Object.keys(D.exams).filter((ex) => inScope.some((q) => q.exam === ex));
+    const years = (c.years || []).filter((y) => exams.includes(y));
+    const pool = pkPool(D, scope, years);
+    const examN = scope === "all" ? EXAM_TOTAL : BOOK_BY_ID[scope].examQ;
+    const nOpt = [["exam", `本试题数 ${examN}`], [10, "10"], [20, "20"], [30, "30"], ["max", `全部 ${pool.length}`]];
+    const nSel = c.n ?? "exam";
+    const n = Math.max(1, Math.min(pool.length, nSel === "exam" ? examN : nSel === "max" ? pool.length : Number(nSel) || examN));
+    const custom = !nOpt.some(([k]) => String(k) === String(nSel));
+    el.innerHTML = `
+      ${fixedBook ? "" : `<div class="pk-row"><span class="pk-k">科目</span><div class="seg">${[["all", "全科（混合）"], ...ready.map((b) => [b.id, b.title])].map(([k, v]) => `<button data-ps="${k}" class="${k === scope ? "on" : ""}">${esc(v)}</button>`).join("")}</div></div>`}
+      <div class="pk-row"><span class="pk-k">年份</span><div class="pk-years">
+        <button class="pk-y ${years.length ? "" : "on"}" data-py="">全部年份混合</button>
+        ${exams.map((ex) => `<button class="pk-y ${years.includes(ex) ? "on" : ""}" data-py="${ex}">${esc(D.exams[ex])}</button>`).join("")}</div></div>
+      <div class="pk-row"><span class="pk-k">题数</span><div class="seg">${nOpt.map(([k, v]) => `<button data-pn="${k}" class="${String(k) === String(nSel) ? "on" : ""}">${v}</button>`).join("")}</div>
+        <label class="small muted">自定义 <input type="number" id="pkN" min="1" max="${pool.length}" value="${custom ? n : ""}" placeholder="题数" style="width:64px"></label></div>
+      <p class="small muted" style="margin:6px 0 10px">从 <b>${pool.length}</b> 题里抽 <b>${n}</b> 题${years.length === 1 ? "（只选一个年度、题数取全部时就是原样整套卷）" : "，尽量每个年度都抽到"}${scope === "all" && ready.length < BOOKS.length ? `。目前只导入了 ${ready.map((b) => esc(b.title)).join("、")}，全科只能先从已有科目里抽` : ""}。模考时间按本试节奏，每题 2 分 24 秒：<b>${Math.round(n * 2.4)}</b> 分钟。</p>
+      <div class="row">
+        <button class="btn primary" data-pgo="mock" ${pool.length ? "" : "disabled"}>开始模考 ${n} 题</button>
+        <button class="btn" data-pgo="q" ${pool.length ? "" : "disabled"}>当练习做（每题看解析）</button>
+      </div>`;
+    el.onclick = (e) => {
+      const b = e.target.closest("button"); if (!b || !el.contains(b)) return;
+      e.stopPropagation();
+      const d = b.dataset, cfg = getPK();
+      if (d.ps) { cfg.scope = d.ps; cfg.years = []; setPK(cfg); return render(); }
+      if (d.py !== undefined) {
+        const ys = new Set(years);
+        if (!d.py) ys.clear(); else ys.has(d.py) ? ys.delete(d.py) : ys.add(d.py);
+        cfg.years = [...ys]; setPK(cfg); return render();
+      }
+      if (d.pn) { cfg.n = /^\d+$/.test(d.pn) ? Number(d.pn) : d.pn; setPK(cfg); return render(); }
+      if (d.pgo) {
+        const keys = pkPick(D, scope, years, n);
+        const ttl = `${scope === "all" ? "全科" : BOOK_BY_ID[scope].title} · ${!years.length ? "全年份" : years.length === 1 ? D.exams[years[0]] : `${years.length} 个年度`} · ${keys.length} 题`;
+        d.pgo === "mock" ? startMock(keys, `${ttl} 模考`) : start("q", keys, ttl);
+      }
+    };
+    const inp = el.querySelector("#pkN");
+    inp.onchange = () => { const v = Math.floor(Number(inp.value)); if (v > 0) { const cfg = getPK(); cfg.n = v; setPK(cfg); render(); } };
+  };
+  render();
 }
 
 // ---------- 科目页 ----------
@@ -187,7 +258,11 @@ export async function viewBook(bookId) {
   const { $, esc } = C;
   const b = BOOK_BY_ID[bookId];
   const D = await kkDB();
-  const { qs, st } = D.byBook[bookId];
+  const { qs: qsAll, st: stAll } = D.byBook[bookId];
+  const F = getImpF();
+  const qs = qsAll, st = stAll; // 统计、年度、コース都看全部
+  const fq = qsAll.filter((q) => ptsMatch(q.points, F)), fs = stAll.filter((x) => ptsMatch(x.pts, F)); // 「开始练习」按重要度筛
+  const fl = F === "all" ? "" : F === "none" ? "未标重要度 · " : `${F} 类 · `;
   const crumbs = `<div class="crumbs"><a href="#/kk">过去问</a> › ${esc(b.title)}</div>`;
   if (!qs.length) { $("#app").innerHTML = `${crumbs}<h1>${esc(b.title)}</h1><div class="card">这一科的题库还没导入（本试 ${b.examQ} 题，${esc(b.qNo)}）。</div>`; return; }
   const T = tally();
@@ -202,7 +277,7 @@ export async function viewBook(bookId) {
     return { c, qs: cq, st: cs, s: statFor([...cq.map((q) => q.id), ...cs.map((x) => x.key)], T) };
   });
   const pts = [...m.values()].filter((x) => POINT_BY_ID[x.id]?.book === bookId);
-  const hot = pts.filter((x) => x.nEx / nExams >= 0.75).sort((a, b) => b.nEx - a.nEx || b.st - a.st);
+  const hot = pts.filter((x) => x.nEx / nExams >= 0.75 && ptsMatch([x.id], F)).sort((a, b) => b.nEx - a.nEx || b.st - a.st);
   const weak = pts.filter(WEAK).sort((a, b) => a.ok / a.n - b.ok / b.n);
   $("#app").innerHTML = `${crumbs}<h1>${esc(b.title)}<span class="muted small">　${esc(b.zh)} · 本试 ${b.examQ} 题（${esc(b.qNo)}）</span></h1>
   <div class="stats">
@@ -213,18 +288,20 @@ export async function viewBook(bookId) {
   </div>
   <div class="card">
     <h2>开始练习</h2>
+    <div class="impf-bar"><span class="small muted">只练这些重要度</span><div class="seg" id="kkImpF">${IMPF.map(([k, v]) => `<button data-f="${k}" class="${k === F ? "on" : ""}">${v}</button>`).join("")}</div>
+      <span class="small muted">${F === "all" ? `${qsAll.length} 题 · ${stAll.length} 肢` : `${fq.length} 题 · ${fs.length} 肢符合`}</span></div>
     <div class="row">
-      <button class="btn primary" data-go="rq">随机 10 题（四选一）</button>
-      <button class="btn primary" data-go="ro">随机 20 肢（○×）</button>
-      <button class="btn" data-go="nq">没做过的 10 题</button>
+      <button class="btn primary" data-go="rq" ${fq.length ? "" : "disabled"}>随机 10 题（四选一）</button>
+      <button class="btn primary" data-go="ro" ${fs.length ? "" : "disabled"}>随机 20 肢（○×）</button>
+      <button class="btn" data-go="nq" ${fq.some((q) => !T.has(q.id)) ? "" : "disabled"}>没做过的 10 题</button>
       <button class="btn" data-go="hot" ${hot.length ? "" : "disabled"}>高频ポイント ○×</button>
       <button class="btn" data-go="wrong" ${wrong.length ? "" : "disabled"}>本科到期错题（${wrong.length}）</button>
-      <button class="btn" data-go="mock">模考 ${b.examQ} 题</button>
     </div>
-    <p class="small muted" style="margin:10px 0 0">做错的题进错题本，按 1 → 3 → 7 天间隔再出现，到期那天答对三次才移出；相关ポイント如果已标「已掌握」，会被排到明天回炉复习。</p>
+    <p class="small muted" style="margin:10px 0 0">重要度筛选对上面这几个按钮有效（按题目对应的ポイント算；教材没印重要度的ポイント，在讲义页自己标）。做错的题进错题本，按 1 → 3 → 7 天间隔再出现，到期那天答对三次才移出；相关ポイント如果已标「已掌握」，会被排到明天回炉复习。</p>
   </div>
+  <div class="card"><h2>模考 / 按年份抽题</h2><div id="picker"></div></div>
   <div class="card"><h2>薄弱ポイント</h2>${weak.length ? weakRows(weak.slice(0, 8), nExams) : `<p class="small muted" style="margin:0">做题后，正确率低于 70% 的ポイント会出现在这里（每个至少答 3 次才算）。</p>`}</div>
-  <div class="card"><h2>高频ポイント</h2>
+  <div class="card"><h2>高频ポイント${F === "all" ? "" : ` <span class="small muted">（只看${fl.replace(" · ", "")}）</span>`}</h2>
     <p class="small muted" style="margin-top:-6px">近 ${nExams} 场考试里出现 ≥ 75% 的ポイント（按场数排序）。</p>
     ${hot.map((x) => { const p = POINT_BY_ID[x.id], h = heat(x, nExams);
       return `<div class="hrow kk-row"><span class="freq hot" title="${h.tip}">${h.label}</span><a class="hl" href="#/p/${x.id}">${esc(p.courseTitle)} › <b>${esc(p.title)}</b></a>
@@ -252,18 +329,19 @@ export async function viewBook(bookId) {
   $("#app").onclick = (e) => {
     const el = e.target.closest("button"); if (!el) return;
     const d = el.dataset;
-    if (d.go === "rq") start("q", shuffle(qs.map((q) => q.id)).slice(0, 10), `${b.title} 随机 10 题`);
-    if (d.go === "ro") start("ox", shuffle(st.map((x) => x.key)).slice(0, 20), `${b.title} 随机 20 肢`);
-    if (d.go === "nq") start("q", shuffle(qs.filter((q) => !T.has(q.id)).map((q) => q.id)).slice(0, 10), `${b.title} 没做过的题`);
-    if (d.go === "hot") { const ids = new Set(hot.map((x) => x.id)); start("ox", shuffle(st.filter((x) => x.pts.some((p) => ids.has(p))).map((x) => x.key)).slice(0, 30), `${b.title} 高频ポイント`); }
+    if (d.f && el.closest("#kkImpF")) { setImpF(d.f); viewBook(bookId); return; }
+    if (d.go === "rq") start("q", shuffle(fq.map((q) => q.id)).slice(0, 10), `${b.title} ${fl}随机 10 题`);
+    if (d.go === "ro") start("ox", shuffle(fs.map((x) => x.key)).slice(0, 20), `${b.title} ${fl}随机 20 肢`);
+    if (d.go === "nq") start("q", shuffle(fq.filter((q) => !T.has(q.id)).map((q) => q.id)).slice(0, 10), `${b.title} ${fl}没做过的题`);
+    if (d.go === "hot") { const ids = new Set(hot.map((x) => x.id)); start("ox", shuffle(st.filter((x) => x.pts.some((p) => ids.has(p))).map((x) => x.key)).slice(0, 30), `${b.title} ${fl}高频ポイント`); }
     if (d.go === "wrong") { const q = wrong.filter(isQ); start(q.length ? "q" : "ox", shuffle(q.length ? q : wrong), `${b.title} 错题`); }
-    if (d.go === "mock") startMock(pickMock(D, bookId, b.examQ), `${b.title} 模考`);
     if (d.exam) start("q", qs.filter((q) => q.exam === d.exam).map((q) => q.id), `${D.exams[d.exam]} ${b.title}`);
     if (d.exmock) startMock(qs.filter((q) => q.exam === d.exmock).map((q) => q.id), `${D.exams[d.exmock]} ${b.title} 模考`);
     if (d.cq) { const c = courses.find((x) => x.c.n == d.cq); start("q", c.qs.map((q) => q.id), `第${c.c.n}コース ${c.c.title}`); }
     if (d.co) { const c = courses.find((x) => x.c.n == d.co); start("ox", shuffle(c.st.map((x) => x.key)), `第${c.c.n}コース ${c.c.title} ○×`); }
     weakClick(el, D);
   };
+  mountPicker(D, $("#picker"), bookId);
 }
 
 // ---------- 错题本 ----------
@@ -328,10 +406,10 @@ export async function viewMock() {
   <div class="mock-grid">${mock.keys.map((k, i) => `<button class="${i === mock.i ? "cur" : ""} ${mock.ans[k] ? "done" : ""}" data-go="${i}">${i + 1}</button>`).join("")}</div>
   <div class="card kk-q">
     <div class="row"><b>第 ${mock.i + 1} 题</b><span class="muted small">${esc(BOOK_BY_ID[q.book]?.title || "")} · ${esc(D.exams[q.exam])} 問${q.no}</span><span class="spacer"></span><button class="btn sm" id="zhBtn">中文意思</button></div>
-    <div class="kk-stem">${nl(q.stem)}</div>
+    <div class="kk-stem" lang="ja">${nl(q.stem)}</div>
     <div class="kk-zh" id="zh" hidden>${esc(q.stemZh)}</div>
-    ${q.items?.length ? `<div class="kk-items">${q.items.map((it) => `<div class="kk-item"><b>${esc(it.label)}</b> ${nl(it.text)}</div>`).join("")}</div>` : ""}
-    <div class="kk-choices">${q.choices.map((c, i) => `<button class="kk-choice ${a === i + 1 ? "picked" : ""}" data-c="${i + 1}"><b>${i + 1}</b><span>${nl(c)}</span></button>`).join("")}</div>
+    ${q.items?.length ? `<div class="kk-items">${q.items.map((it) => `<div class="kk-item" lang="ja"><b>${esc(it.label)}</b> ${nl(it.text)}</div>`).join("")}</div>` : ""}
+    <div class="kk-choices">${q.choices.map((c, i) => `<button class="kk-choice ${a === i + 1 ? "picked" : ""}" data-c="${i + 1}"><b>${i + 1}</b><span lang="ja">${nl(c)}</span></button>`).join("")}</div>
   </div>
   <div class="row">
     <button class="btn" id="mPrev" ${mock.i ? "" : "disabled"}>← 上一题</button>
@@ -378,7 +456,10 @@ function viewMockResult(D) {
     <div class="stat"><div class="v">${fmtS(mock.secs)}</div><div class="k">用时（限时 ${fmtS(mock.limit)}）</div></div>
   </div>
   ${n === EXAM_TOTAL ? `<p class="small muted">${PASS_HINT}。</p>` : `<p class="small muted">参考：${PASS_HINT}，折合正确率约 66〜76%。</p>`}
-  ${byBook.length > 1 ? `<div class="card"><h2>各科得分</h2>${byBook.map((x) => `<div class="hrow"><span class="hl">${esc(x.b.title)}</span><div class="hbar single"><i class="${x.ok / x.n >= 0.7 ? "ok" : "ng"}" style="width:${(x.ok / x.n) * 100}%"></i></div><span class="hv">${x.ok}/${x.n}</span></div>`).join("")}</div>` : ""}
+  <div class="card"><h2>各科得分 vs 合格目标</h2>
+    ${byBook.map((x) => { const goal = Math.round((TARGET[x.b.id] / x.b.examQ) * x.n * 10) / 10, okGoal = x.ok >= goal;
+      return `<div class="hrow"><span class="hl">${esc(x.b.title)}</span><div class="hbar single"><i class="${okGoal ? "ok" : "ng"}" style="width:${(x.ok / x.n) * 100}%"></i><b class="goal" style="left:${(goal / x.n) * 100}%" title="目标 ${goal}"></b></div><span class="hv">${x.ok}/${x.n}</span><span class="small ${okGoal ? "" : "muted"}" style="width:110px">${okGoal ? "✓ 达到" : "差"} 目标 ${goal}</span></div>`; }).join("")}
+    <p class="small muted" style="margin:8px 0 0">合格目标（满分 50）：権利関係 ${TARGET.kenri}/14 · 宅建業法 ${TARGET.gyoho}/20 · 法令上の制限 ${TARGET.hourei}/8 · 税・その他 ${TARGET.zei}/8，合计 ${Object.values(TARGET).reduce((a, b) => a + b)} 分，留出近年合格线的余量。竖线 = 按题数折算的目标。</p></div>
   <div class="card">${mock.keys.map((k, i) => { const q = D.byId[k], a = mock.ans[k];
     return `<div class="hrow kk-row"><span>${a === q.answer ? '<i class="rk ok">○</i>' : '<i class="rk ng">×</i>'}</span><span class="hl">第 ${i + 1} 题 · ${esc(D.exams[q.exam])} 問${q.no}</span>
       <span class="small muted" style="flex:1">你选 ${a || "—"} · 正解 ${q.answer}</span><button class="btn sm" data-rv="${i}">看解析</button></div>`; }).join("")}</div>
@@ -387,6 +468,9 @@ function viewMockResult(D) {
   $("#rvAll").onclick = () => review(0);
   $("#app").onclick = (e) => { const b = e.target.closest("[data-rv]"); if (b) review(Number(b.dataset.rv)); };
 }
+
+// 各科合格目标分（合计 38，近年合格线 33〜38）：业法拿满是关键，权利关系不贪
+const TARGET = { kenri: 9, gyoho: 18, hourei: 6, zei: 5 };
 
 // ---------- 做题页 ----------
 const nl = (s) => C.esc(String(s ?? "").replace(/^[【（(]?問\s*\d+[】）)]\s*/, "")).replace(/\n/g, "<br>");
@@ -407,16 +491,16 @@ export async function viewRun() {
     const q = D.byId[key], ans = run.picked;
     $("#app").innerHTML = head + `<div class="card kk-q">
       <div class="row"><b>${esc(D.exams[q.exam])} 【問${q.no}】</b><span class="muted small">${esc(BOOK_BY_ID[q.book]?.title || "")} · ${typeName[q.type]}</span><span class="spacer"></span><button class="btn sm" id="zhBtn">中文意思</button><button class="btn sm" id="sideBtn">讲义 / AI 老师</button></div>
-      <div class="kk-stem">${nl(q.stem)}</div>
+      <div class="kk-stem" lang="ja">${nl(q.stem)}</div>
       <div class="kk-zh" id="zh" hidden>${esc(q.stemZh)}</div>
       ${q.items?.length ? `<div class="kk-items">${q.items.map((it, i) => {
         const s = q.statements[i];
-        return `<div class="kk-item ${shown ? (s.ok ? "ok" : "ng") : ""}"><b>${esc(it.label)}</b> ${nl(it.text)}${shown ? ` <span class="mk">${s.ok ? "○" : "×"}</span>` : ""}</div>`;
+        return `<div class="kk-item ${shown ? (s.ok ? "ok" : "ng") : ""}" lang="ja"><b>${esc(it.label)}</b> ${nl(it.text)}${shown ? ` <span class="mk">${s.ok ? "○" : "×"}</span>` : ""}</div>`;
       }).join("")}</div>` : ""}
       <div class="kk-choices">${q.choices.map((c, i) => {
         const n = i + 1, cls = !shown ? "" : n === q.answer ? "right" : n === ans ? "wrong" : "dim";
         const s = q.type === "single" ? q.statements[i] : null;
-        return `<button class="kk-choice ${cls}" data-c="${n}" ${shown ? "disabled" : ""}><b>${n}</b><span>${nl(c)}</span>${shown && s ? `<span class="mk">${s.ok ? "○" : "×"}</span>` : ""}</button>`;
+        return `<button class="kk-choice ${cls}" data-c="${n}" ${shown ? "disabled" : ""}><b>${n}</b><span lang="ja">${nl(c)}</span>${shown && s ? `<span class="mk">${s.ok ? "○" : "×"}</span>` : ""}</button>`;
       }).join("")}</div>
     </div>
     ${shown ? explainQ(q, ans) : `<p class="small muted">键盘：1〜4 选择。</p>`}`;
@@ -428,8 +512,8 @@ export async function viewRun() {
     const right = shown && ((ans === "o") === x.s.ok);
     $("#app").innerHTML = head + `<div class="card kk-q">
       <div class="row"><span class="muted small">${esc(D.exams[q.exam])} 【問${q.no}】 第 ${esc(x.s.key)} 肢 · ${esc(BOOK_BY_ID[q.book]?.title || "")}</span><span class="spacer"></span><button class="btn sm" id="zhBtn">中文意思</button><button class="btn sm" id="sideBtn">讲义 / AI 老师</button></div>
-      <details class="kk-ctx"><summary class="small muted">题目前提（判决文、人物关系等在这里）</summary><div class="kk-stem small">${nl(q.stem)}</div></details>
-      <div class="kk-ox-text">${nl(text)}</div>
+      <details class="kk-ctx"><summary class="small muted">题目前提（判决文、人物关系等在这里）</summary><div class="kk-stem small" lang="ja">${nl(q.stem)}</div></details>
+      <div class="kk-ox-text" lang="ja">${nl(text)}</div>
       <div class="kk-zh" id="zh" hidden>${esc(x.s.textZh)}</div>
       <p class="small muted" style="margin:6px 0 0">判断这句话本身对不对（按出题当时的法律）。</p>
       <div class="row kk-ox">
@@ -598,6 +682,7 @@ export async function courseAccuracy() {
 
 // ---------- 给其他页面用 ----------
 export function startQ(keys, title) { start("q", keys, title); }
+export function startOX(keys, title) { start("ox", keys, title); }
 export async function lawChangeQs() {
   const D = await kkDB();
   return D.qs.filter((q) => q.lawChange).map((q) => ({ ...q, examName: D.exams[q.exam] }));
